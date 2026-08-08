@@ -1,0 +1,150 @@
+# Arquitetura
+
+## Hardware
+Microcontrolador:
+Teensy 4.0
+
+Componentes conectados:
+- I2C: Um único barramento I2C conecta a Teensy ao multiplexador.
+
+Multiplexador: PCA9548A
+
+Sensores conectados ao PCA9548A:
+- Canal 0: ICM20948 #0
+
+- Canal 1: ICM20948 #1
+
+- Canal 2: BMP390 #0
+
+- Canal 3: BMP390 #1
+
+- Canal 4: ICM20948 #2
+
+
+Todos utilizam 3,3 V.
+
+SPI: Um único módulo microSD.
+
+I2S: Um microfone digital ICS43434
+
+## Software
+Mudança importante em relação ao projeto antigo
+
+O firmware antigo da Nicla utilizava:
+
+NDP.begin()
+NDP.load()
+Nicla_System
+BMI270 interno
+BMM150 interno
+
+Nada disso deverá existir no novo firmware.
+
+Toda a arquitetura deve ser reescrita considerando exclusivamente a Teensy 4.0
+
+- Organização do código 
+
+PBIC/
+│
+├── src/
+│   ├── main.cpp
+│   │
+│   ├── drivers/
+│   │   ├── pca9548a.cpp
+│   │   ├── pca9548a.h
+│   │   ├── icm20948.cpp
+│   │   ├── icm20948.h
+│   │   ├── bmp390.cpp
+│   │   ├── bmp390.h
+│   │   ├── microphone.cpp
+│   │   ├── microphone.h
+│   │   ├── sd_logger.cpp
+│   │   └── sd_logger.h
+│   │
+│   ├── utils/
+│   │   ├── crc.cpp
+│   │   ├── crc.h
+│   │   ├── packet.cpp
+│   │   └── packet.h
+│   │
+│   └── config/
+│       ├── pins.h
+│       └── constants.h
+│
+├── python/
+│   └── parse_data.py
+│
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── HARDWARE_SPEC.md
+│   └── FIRMWARE_GUIDELINES.md
+│
+└── README.md
+
+- Estrutura do cartão SD
+/session.txt
+
+/S001/
+├── imu.bin
+├── audio.raw
+├── meta.txt
+└── status.txt
+
+/S002/
+├── imu.bin
+├── audio.raw
+├── meta.txt
+└── status.txt
+
+session.txt: Fica na raiz do cartão e guarda o número da última sessão
+imu.bin: Contém os pacotes binários das IMUs e barômetros.
+audio.raw: Contém apenas amostras do microfone
+meta.txt: Descreve a sessão e a configuração.
+
+"Exemplo:
+
+session=1
+firmware_version=0.1.0
+board=Teensy 4.0
+
+imu_sample_rate_hz=100
+bmp_sample_rate_hz=25
+
+audio_enabled=true
+audio_sample_rate_hz=16000
+audio_channels=1
+audio_bits_per_sample=16
+
+imu_packet_size=0
+imu_magic=0xAA55
+crc=CRC-8 polynomial 0x07
+
+icm0_channel=0
+icm1_channel=1
+bmp0_channel=2
+bmp1_channel=3
+icm2_channel=4
+
+status.txt: Registra se os componentes inicializaram corretamente e se a gravação funcionou 
+
+## Diagnóstico inicial dos ICM-20948
+
+O firmware usa `Adafruit ICM20X 2.0.7` para os breakouts ICM-20948 e um driver
+próprio baseado em `Wire` para o PCA9548A. Os canais ICM são `0`, `1` e `4`.
+
+Configuração inicial de bancada:
+
+- acelerômetro: faixa de `+/-2 g`, divisor 10, ODR aproximado de 102,3 Hz;
+- giroscópio: faixa de `+/-250 graus/s`, divisor 10, ODR de 100 Hz;
+- filtros digitais passa-baixas desativados;
+- magnetômetro AK09916 colocado em `SHUTDOWN` e não lido;
+- saída serial de diagnóstico: uma amostra por ICM a cada segundo.
+
+A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
+desliga logo depois da inicialização porque o magnetômetro não faz parte desta
+etapa. As faixas de `+/-2 g` e `+/-250 graus/s` priorizam resolução no teste de
+bancada e devem ser revistas após testes de saturação com movimento real.
+
+Depois de selecionar um canal, o driver aguarda 80 microssegundos antes de
+acessar o sensor. Esse tempo veio da experiência com o hardware legado e ainda
+precisa ser validado na montagem Teensy 4.0 + breakouts Adafruit.
