@@ -1,0 +1,15 @@
+.pio/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Experimental data
+data/
+*.raw

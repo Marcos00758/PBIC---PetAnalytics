@@ -30,7 +30,7 @@ RESET do PCA9548A não será utilizado.
 Teensy - SD
 11 - MOSI
 12 - MISO
-13 - SCK
+13 - CLK
 10 - CS
 3V3 - VCC
 GND - GND
