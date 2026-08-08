@@ -15,6 +15,17 @@ struct Vector3f {
   float z;
 };
 
+struct Vector3i16 {
+  int16_t x;
+  int16_t y;
+  int16_t z;
+};
+
+struct Icm20948RawSample {
+  Vector3i16 acceleration;
+  Vector3i16 gyro;
+};
+
 struct Icm20948Sample {
   uint32_t timestampUs;
   Vector3f accelerationMps2;
@@ -28,6 +39,7 @@ class Icm20948 {
 
   bool begin();
   bool read(Icm20948Sample& sample);
+  bool readRaw(Icm20948RawSample& sample);
 
   bool initialized() const { return initialized_; }
   uint8_t muxChannel() const { return muxChannel_; }
@@ -39,6 +51,8 @@ class Icm20948 {
   bool readWhoAmI(uint8_t address, uint8_t& value);
   bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
   bool readRegister(uint8_t address, uint8_t reg, uint8_t& value);
+  bool readRegisters(uint8_t address, uint8_t startRegister, uint8_t* data,
+                     size_t length);
   bool configure();
 
   Pca9548a& mux_;

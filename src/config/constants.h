@@ -25,6 +25,12 @@ constexpr uint8_t kIcmExpectedWhoAmI = 0xEA;
 constexpr uint16_t kIcmAccelRateDivisor = 10;
 constexpr uint8_t kIcmGyroRateDivisor = 10;
 
-constexpr uint32_t kDiagnosticReadIntervalMs = 1000;
+constexpr uint32_t kImuSampleRateHz = 100;
+constexpr uint32_t kImuSamplePeriodUs = 1000000UL / kImuSampleRateHz;
+static_assert(1000000UL % kImuSampleRateHz == 0,
+              "IMU sample period must be an integer number of microseconds");
+
+constexpr uint16_t kImuPacketMagic = 0xAA55;
+constexpr uint8_t kCrc8Polynomial = 0x07;
 
 }  // namespace pet::config

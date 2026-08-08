@@ -11,5 +11,5 @@ __pycache__/
 Thumbs.db
 
 # Experimental data
-data/
+/data/
 *.raw

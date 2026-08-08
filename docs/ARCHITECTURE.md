@@ -127,7 +127,7 @@ icm2_channel=4
 
 status.txt: Registra se os componentes inicializaram corretamente e se a gravação funcionou 
 
-## Diagnóstico inicial dos ICM-20948
+## Aquisição inicial dos ICM-20948
 
 O firmware usa `Adafruit ICM20X 2.0.7` para os breakouts ICM-20948 e um driver
 próprio baseado em `Wire` para o PCA9548A. Os canais ICM são `0`, `1` e `4`.
@@ -138,7 +138,8 @@ Configuração inicial de bancada:
 - giroscópio: faixa de `+/-250 graus/s`, divisor 10, ODR de 100 Hz;
 - filtros digitais passa-baixas desativados;
 - magnetômetro AK09916 colocado em `SHUTDOWN` e não lido;
-- saída serial de diagnóstico: uma amostra por ICM a cada segundo.
+- rodada de leitura dos três ICMs a 100 Hz, agendada com `micros()`;
+- saída USB binária não bloqueante em pacotes de 45 bytes.
 
 A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
 desliga logo depois da inicialização porque o magnetômetro não faz parte desta
@@ -148,3 +149,14 @@ bancada e devem ser revistas após testes de saturação com movimento real.
 Depois de selecionar um canal, o driver aguarda 80 microssegundos antes de
 acessar o sensor. Esse tempo veio da experiência com o hardware legado e ainda
 precisa ser validado na montagem Teensy 4.0 + breakouts Adafruit.
+
+O driver lê diretamente o bloco de 12 bytes de acelerômetro e giroscópio a
+partir do registrador `0x2D`, em big-endian. A biblioteca Adafruit continua
+responsável pela inicialização e configuração do ICM. A leitura direta permite
+validar os retornos de `Wire`, transmitir os valores `int16` sem conversão no
+microcontrolador e contabilizar falhas I2C por sensor.
+
+O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
+sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
+`src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
+com o Python está documentado em `docs/DATA_FORMAT.md`.

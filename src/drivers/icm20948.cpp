@@ -7,7 +7,15 @@
 namespace pet::drivers {
 namespace {
 
-constexpr float kRadiansToDegrees = 57.29577951308232f;
+constexpr uint8_t kAccelDataRegister = 0x2D;
+constexpr size_t kAccelGyroDataLength = 12;
+constexpr float kAccelScaleMps2PerCount = (2.0f * 9.80665f) / 32767.5f;
+constexpr float kGyroScaleDpsPerCount = 250.0f / 32768.0f;
+
+int16_t decodeBigEndianInt16(const uint8_t* bytes) {
+  return static_cast<int16_t>((static_cast<uint16_t>(bytes[0]) << 8) |
+                              static_cast<uint16_t>(bytes[1]));
+}
 
 bool isFinite(const Vector3f& value) {
   return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
@@ -49,30 +57,44 @@ bool Icm20948::begin() {
 }
 
 bool Icm20948::read(Icm20948Sample& sample) {
-  if (!initialized_ || !mux_.selectChannel(muxChannel_)) {
-    return false;
-  }
-
-  uint8_t currentWhoAmI = 0;
-  if (!readWhoAmI(address_, currentWhoAmI) || currentWhoAmI != whoAmI_) {
-    return false;
-  }
-
-  sensors_event_t accel{};
-  sensors_event_t gyro{};
-  sensors_event_t temperature{};
-  if (!sensor_.getEvent(&accel, &gyro, &temperature, nullptr)) {
+  Icm20948RawSample raw{};
+  if (!readRaw(raw)) {
     return false;
   }
 
   sample.timestampUs = micros();
-  sample.accelerationMps2 = {accel.acceleration.x, accel.acceleration.y,
-                             accel.acceleration.z};
-  sample.gyroDps = {gyro.gyro.x * kRadiansToDegrees,
-                    gyro.gyro.y * kRadiansToDegrees,
-                    gyro.gyro.z * kRadiansToDegrees};
+  sample.accelerationMps2 = {
+      raw.acceleration.x * kAccelScaleMps2PerCount,
+      raw.acceleration.y * kAccelScaleMps2PerCount,
+      raw.acceleration.z * kAccelScaleMps2PerCount};
+  sample.gyroDps = {raw.gyro.x * kGyroScaleDpsPerCount,
+                    raw.gyro.y * kGyroScaleDpsPerCount,
+                    raw.gyro.z * kGyroScaleDpsPerCount};
 
   return isFinite(sample.accelerationMps2) && isFinite(sample.gyroDps);
+}
+
+bool Icm20948::readRaw(Icm20948RawSample& sample) {
+  if (!initialized_ || !mux_.selectChannel(muxChannel_)) {
+    return false;
+  }
+
+  if (!writeRegister(address_, config::kIcmRegisterBankSelect, 0x00)) {
+    return false;
+  }
+
+  uint8_t data[kAccelGyroDataLength]{};
+  if (!readRegisters(address_, kAccelDataRegister, data, sizeof(data))) {
+    return false;
+  }
+
+  sample.acceleration = {decodeBigEndianInt16(&data[0]),
+                         decodeBigEndianInt16(&data[2]),
+                         decodeBigEndianInt16(&data[4])};
+  sample.gyro = {decodeBigEndianInt16(&data[6]),
+                 decodeBigEndianInt16(&data[8]),
+                 decodeBigEndianInt16(&data[10])};
+  return true;
 }
 
 bool Icm20948::detectAddress() {
@@ -111,18 +133,32 @@ bool Icm20948::writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
 }
 
 bool Icm20948::readRegister(uint8_t address, uint8_t reg, uint8_t& value) {
+  return readRegisters(address, reg, &value, 1);
+}
+
+bool Icm20948::readRegisters(uint8_t address, uint8_t startRegister,
+                             uint8_t* data, size_t length) {
+  if (data == nullptr || length == 0 || length > 255) {
+    return false;
+  }
+
   wire_.beginTransmission(address);
-  wire_.write(reg);
+  wire_.write(startRegister);
   if (wire_.endTransmission(false) != 0) {
     return false;
   }
 
-  if (wire_.requestFrom(address, static_cast<uint8_t>(1)) != 1 ||
-      !wire_.available()) {
+  const uint8_t requested = static_cast<uint8_t>(length);
+  if (wire_.requestFrom(address, requested) != requested) {
     return false;
   }
 
-  value = static_cast<uint8_t>(wire_.read());
+  for (size_t i = 0; i < length; ++i) {
+    if (!wire_.available()) {
+      return false;
+    }
+    data[i] = static_cast<uint8_t>(wire_.read());
+  }
   return true;
 }
 
