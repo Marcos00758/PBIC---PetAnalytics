@@ -22,7 +22,8 @@ pet::drivers::Bmp390 bmp0(mux, Wire, pet::config::kBmp0Channel);
 pet::drivers::Bmp390 bmp1(mux, Wire, pet::config::kBmp1Channel);
 pet::drivers::Bmp390* const bmps[] = {&bmp0, &bmp1};
 pet::services::ImuAcquisition acquisition(
-    icm0, icm1, icm2, pet::config::kImuSamplePeriodUs);
+    icm0, icm1, icm2, bmp0, bmp1, pet::config::kImuSamplePeriodUs,
+    pet::config::kBmpSamplesPerImuSample);
 
 bool acquisitionReady = false;
 
@@ -144,6 +145,16 @@ void setup() {
     }
     Serial.print("BMP_DIAGNOSTIC_END elapsed_ms=");
     Serial.println(diagnostic.elapsedMs);
+
+    bool rawSamplingReady = true;
+    for (pet::drivers::Bmp390* bmp : bmps) {
+      rawSamplingReady = bmp->startRawSampling25Hz() && rawSamplingReady;
+    }
+    if (!rawSamplingReady) {
+      Serial.println("BMP raw sampling configuration FAILED");
+      return;
+    }
+    Serial.println("BMP raw sampling OK rate_hz=25 cached_in_100hz_packets");
   }
   mux.disableAllChannels();
 
@@ -155,7 +166,9 @@ void setup() {
   Serial.print("BINARY_STREAM_START packet_size=");
   Serial.print(sizeof(pet::data::ImuPacket));
   Serial.print(" sample_rate_hz=");
-  Serial.println(pet::config::kImuSampleRateHz);
+  Serial.print(pet::config::kImuSampleRateHz);
+  Serial.print(" bmp_rate_hz=");
+  Serial.println(pet::config::kBmpSampleRateHz);
 
   acquisition.start(micros());
   acquisitionReady = true;

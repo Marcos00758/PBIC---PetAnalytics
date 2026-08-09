@@ -13,12 +13,19 @@ struct Bmp390Sample {
   float pressurePa;
 };
 
+struct Bmp390RawSample {
+  uint32_t pressure;
+  uint32_t temperature;
+};
+
 class Bmp390 {
  public:
   Bmp390(Pca9548a& mux, TwoWire& wire, uint8_t muxChannel);
 
   bool begin();
   bool read(Bmp390Sample& sample);
+  bool startRawSampling25Hz();
+  bool readRaw(Bmp390RawSample& sample);
 
   bool initialized() const { return initialized_; }
   uint8_t muxChannel() const { return muxChannel_; }
@@ -27,6 +34,8 @@ class Bmp390 {
 
  private:
   bool addressResponds(uint8_t address);
+  bool writeRegister(uint8_t reg, uint8_t value);
+  bool readRegisters(uint8_t startRegister, uint8_t* data, size_t length);
 
   Pca9548a& mux_;
   TwoWire& wire_;

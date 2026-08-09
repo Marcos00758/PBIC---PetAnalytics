@@ -19,6 +19,7 @@ constexpr uint8_t kBmp0Channel = 2;
 constexpr uint8_t kBmp1Channel = 3;
 constexpr uint8_t kBmpCandidateAddresses[] = {0x77, 0x76};
 constexpr uint8_t kBmpExpectedChipId = 0x60;
+constexpr uint32_t kBmpSampleRateHz = 25;
 constexpr uint16_t kBmpDiagnosticRounds = 100;
 constexpr uint16_t kBmpDiagnosticWarmupRounds = 10;
 constexpr uint32_t kBmpDiagnosticPeriodUs = 100000;
@@ -35,6 +36,10 @@ constexpr uint8_t kIcmGyroRateDivisor = 10;
 
 constexpr uint32_t kImuSampleRateHz = 100;
 constexpr uint32_t kImuSamplePeriodUs = 1000000UL / kImuSampleRateHz;
+constexpr uint32_t kBmpSamplesPerImuSample =
+    kImuSampleRateHz / kBmpSampleRateHz;
+static_assert(kImuSampleRateHz % kBmpSampleRateHz == 0,
+              "BMP rate must divide IMU rate");
 static_assert(1000000UL % kImuSampleRateHz == 0,
               "IMU sample period must be an integer number of microseconds");
 

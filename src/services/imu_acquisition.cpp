@@ -20,8 +20,14 @@ void appendSampleValues(const drivers::Icm20948RawSample& sample,
 ImuAcquisition::ImuAcquisition(drivers::Icm20948& icm0,
                                drivers::Icm20948& icm1,
                                drivers::Icm20948& icm2,
-                               uint32_t samplePeriodUs)
-    : icms_{&icm0, &icm1, &icm2}, samplePeriodUs_(samplePeriodUs) {}
+                               drivers::Bmp390& bmp0,
+                               drivers::Bmp390& bmp1,
+                               uint32_t samplePeriodUs,
+                               uint32_t bmpSamplesPerImuSample)
+    : icms_{&icm0, &icm1, &icm2},
+      bmps_{&bmp0, &bmp1},
+      samplePeriodUs_(samplePeriodUs),
+      bmpSamplesPerImuSample_(bmpSamplesPerImuSample) {}
 
 void ImuAcquisition::start(uint32_t nowUs) {
   nextSampleUs_ = nowUs + samplePeriodUs_;
@@ -60,6 +66,20 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
   if (!roundSucceeded) {
     ++counters_.failedAcquisitionRounds;
     return false;
+  }
+
+  if (bmpSamplesPerImuSample_ > 0 &&
+      packetSequence % bmpSamplesPerImuSample_ == 0) {
+    for (size_t i = 0; i < kBmpCount; ++i) {
+      drivers::Bmp390RawSample sample{};
+      if (!bmps_[i]->readRaw(sample)) {
+        ++counters_.bmpI2cFailures[i];
+        continue;
+      }
+      bmpPressureRaw_[i] = sample.pressure;
+      bmpTemperatureRaw_[i] = sample.temperature;
+      ++counters_.bmpUpdates[i];
+    }
   }
 
   utils::buildImuPacket(packet, nowUs, packetSequence, values);

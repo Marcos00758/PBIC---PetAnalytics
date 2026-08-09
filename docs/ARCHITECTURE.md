@@ -172,7 +172,19 @@ aquecimento; para as restantes são impressos média, mínimo, máximo e
 desvio-padrão populacional de pressão e temperatura, além das falhas de leitura.
 Uma falha nesse diagnóstico não desativa a aquisição dos ICMs.
 
-Nesta etapa os barômetros ainda não participam do agendador nem do pacote
-binário. Portanto, `docs/DATA_FORMAT.md` e o parser Python permanecem
-inalterados. Os canais só devem ser marcados como confirmados depois do teste
-na montagem física.
+Os canais 2 e 3, ambos no endereço `0x77`, foram confirmados na montagem física.
+Após o diagnóstico, o driver coloca os BMP390 em modo normal contínuo a 25 Hz.
+O serviço de aquisição lê diretamente os seis bytes crus de pressão e
+temperatura, em little-endian, a cada quatro rodadas das IMUs e mantém o último
+valor válido de cada sensor em cache. Falhas BMP possuem contadores próprios e
+não descartam a rodada das IMUs.
+
+A API pública `Adafruit BMP3XX 2.1.6` fornece somente valores compensados e não
+expõe as contagens Bosch cruas. Por isso, a biblioteca permanece responsável
+pela inicialização e validação, enquanto a aquisição contínua usa os
+registradores oficiais `PWR_CTRL` (`0x1B`), `OSR` (`0x1C`), `ODR` (`0x1D`) e o
+bloco de dados `0x04` a `0x09`. Não há `float` nesse caminho de aquisição.
+
+O cache ainda não participa do pacote binário de 45 bytes. Portanto,
+`docs/DATA_FORMAT.md` e o parser Python permanecem inalterados até a próxima
+mudança formal de formato.
