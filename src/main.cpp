@@ -4,6 +4,7 @@
 #include "config/constants.h"
 #include "config/pins.h"
 #include "data/imu_packet.h"
+#include "drivers/bmp390.h"
 #include "drivers/icm20948.h"
 #include "drivers/pca9548a.h"
 #include "services/imu_acquisition.h"
@@ -16,6 +17,9 @@ pet::drivers::Icm20948 icm0(mux, Wire, pet::config::kIcm0Channel, 100);
 pet::drivers::Icm20948 icm1(mux, Wire, pet::config::kIcm1Channel, 110);
 pet::drivers::Icm20948 icm2(mux, Wire, pet::config::kIcm2Channel, 120);
 pet::drivers::Icm20948* const icms[] = {&icm0, &icm1, &icm2};
+pet::drivers::Bmp390 bmp0(mux, Wire, pet::config::kBmp0Channel);
+pet::drivers::Bmp390 bmp1(mux, Wire, pet::config::kBmp1Channel);
+pet::drivers::Bmp390* const bmps[] = {&bmp0, &bmp1};
 pet::services::ImuAcquisition acquisition(
     icm0, icm1, icm2, pet::config::kImuSamplePeriodUs);
 
@@ -43,6 +47,32 @@ bool initializeSensor(pet::drivers::Icm20948& icm) {
   printHexByte(icm.whoAmI());
   Serial.println(" accel=+/-2g gyro=+/-250dps");
   return true;
+}
+
+void diagnoseBmp(pet::drivers::Bmp390& bmp) {
+  Serial.print("BMP390 channel ");
+  Serial.print(bmp.muxChannel());
+
+  if (!bmp.begin()) {
+    Serial.println(" FAILED (tested 0x77 and 0x76; expected CHIP_ID=0x60)");
+    return;
+  }
+
+  Serial.print(" OK address=0x");
+  printHexByte(bmp.address());
+  Serial.print(" CHIP_ID=0x");
+  printHexByte(bmp.chipId());
+
+  pet::drivers::Bmp390Sample sample{};
+  if (!bmp.read(sample)) {
+    Serial.println(" simple_read=FAILED");
+    return;
+  }
+
+  Serial.print(" temperature_c=");
+  Serial.print(sample.temperatureC, 2);
+  Serial.print(" pressure_pa=");
+  Serial.println(sample.pressurePa, 2);
 }
 
 }  // namespace
@@ -75,6 +105,9 @@ void setup() {
   bool sensorsReady = true;
   for (pet::drivers::Icm20948* icm : icms) {
     sensorsReady = initializeSensor(*icm) && sensorsReady;
+  }
+  for (pet::drivers::Bmp390* bmp : bmps) {
+    diagnoseBmp(*bmp);
   }
   mux.disableAllChannels();
 

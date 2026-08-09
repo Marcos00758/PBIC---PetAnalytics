@@ -160,3 +160,16 @@ O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
 sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
 `src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
 com o Python está documentado em `docs/DATA_FORMAT.md`.
+
+## Diagnóstico inicial dos BMP390
+
+Os dois BMP390 permanecem definidos nos canais 2 e 3 do PCA9548A. Durante o
+`setup`, o firmware testa os endereços `0x77` e `0x76`, valida o `CHIP_ID`
+esperado `0x60` por meio da biblioteca `Adafruit BMP3XX 2.1.6` e imprime uma
+leitura simples de temperatura e pressão. Uma falha nesse diagnóstico não
+desativa a aquisição dos ICMs.
+
+Nesta etapa os barômetros ainda não participam do agendador nem do pacote
+binário. Portanto, `docs/DATA_FORMAT.md` e o parser Python permanecem
+inalterados. Os canais só devem ser marcados como confirmados depois do teste
+na montagem física.
