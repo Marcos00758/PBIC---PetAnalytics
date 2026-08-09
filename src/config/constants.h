@@ -19,6 +19,9 @@ constexpr uint8_t kBmp0Channel = 2;
 constexpr uint8_t kBmp1Channel = 3;
 constexpr uint8_t kBmpCandidateAddresses[] = {0x77, 0x76};
 constexpr uint8_t kBmpExpectedChipId = 0x60;
+constexpr uint16_t kBmpDiagnosticRounds = 100;
+constexpr uint16_t kBmpDiagnosticWarmupRounds = 10;
+constexpr uint32_t kBmpDiagnosticPeriodUs = 100000;
 
 // Try the Adafruit STEMMA QT default first, then the alternate address.
 constexpr uint8_t kIcmCandidateAddresses[] = {0x69, 0x68};
