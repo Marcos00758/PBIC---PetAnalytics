@@ -1,7 +1,5 @@
 #include "drivers/bmp390.h"
 
-#include <math.h>
-
 #include "config/constants.h"
 
 namespace pet::drivers {
@@ -56,18 +54,6 @@ bool Bmp390::begin() {
   }
 
   return false;
-}
-
-bool Bmp390::read(Bmp390Sample& sample) {
-  if (!initialized_ || !mux_.selectChannel(muxChannel_) ||
-      !sensor_.performReading()) {
-    return false;
-  }
-
-  sample.temperatureC = static_cast<float>(sensor_.temperature);
-  sample.pressurePa = static_cast<float>(sensor_.pressure);
-  return isfinite(sample.temperatureC) && isfinite(sample.pressurePa) &&
-         sample.pressurePa > 0.0f;
 }
 
 bool Bmp390::startRawSampling25Hz() {

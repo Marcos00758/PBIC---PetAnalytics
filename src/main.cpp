@@ -7,7 +7,6 @@
 #include "drivers/bmp390.h"
 #include "drivers/icm20948.h"
 #include "drivers/pca9548a.h"
-#include "services/bmp_diagnostic.h"
 #include "services/imu_acquisition.h"
 
 namespace {
@@ -68,30 +67,6 @@ bool initializeBmp(pet::drivers::Bmp390& bmp) {
   return true;
 }
 
-void printBmpStatistics(size_t index,
-                        const pet::services::BmpDiagnosticSensorResult& result) {
-  Serial.print("BMP_STATS index=");
-  Serial.print(index);
-  Serial.print(" channel=");
-  Serial.print(bmps[index]->muxChannel());
-  Serial.print(" samples=");
-  Serial.print(result.pressurePa.count);
-  Serial.print(" failures=");
-  Serial.print(result.readFailures);
-  Serial.print(" pressure_mean_pa=");
-  Serial.print(result.pressurePa.mean, 2);
-  Serial.print(" pressure_min_pa=");
-  Serial.print(result.pressurePa.minimum, 2);
-  Serial.print(" pressure_max_pa=");
-  Serial.print(result.pressurePa.maximum, 2);
-  Serial.print(" pressure_stddev_pa=");
-  Serial.print(result.pressurePa.standardDeviation, 3);
-  Serial.print(" temperature_mean_c=");
-  Serial.print(result.temperatureC.mean, 2);
-  Serial.print(" temperature_stddev_c=");
-  Serial.println(result.temperatureC.standardDeviation, 3);
-}
-
 }  // namespace
 
 void setup() {
@@ -128,24 +103,6 @@ void setup() {
     bmpsReady = initializeBmp(*bmp) && bmpsReady;
   }
   if (bmpsReady) {
-    Serial.print("BMP_DIAGNOSTIC_START rounds=");
-    Serial.print(pet::config::kBmpDiagnosticRounds);
-    Serial.print(" warmup_rounds=");
-    Serial.print(pet::config::kBmpDiagnosticWarmupRounds);
-    Serial.print(" period_ms=");
-    Serial.println(pet::config::kBmpDiagnosticPeriodUs / 1000);
-
-    const pet::services::BmpDiagnosticResult diagnostic =
-        pet::services::runBmpDiagnostic(
-            bmp0, bmp1, pet::config::kBmpDiagnosticRounds,
-            pet::config::kBmpDiagnosticWarmupRounds,
-            pet::config::kBmpDiagnosticPeriodUs);
-    for (size_t i = 0; i < 2; ++i) {
-      printBmpStatistics(i, diagnostic.sensors[i]);
-    }
-    Serial.print("BMP_DIAGNOSTIC_END elapsed_ms=");
-    Serial.println(diagnostic.elapsedMs);
-
     bool rawSamplingReady = true;
     for (pet::drivers::Bmp390* bmp : bmps) {
       rawSamplingReady = bmp->startRawSampling25Hz() && rawSamplingReady;

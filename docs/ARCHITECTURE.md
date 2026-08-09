@@ -161,16 +161,11 @@ sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
 `src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
 com o Python está documentado em `docs/DATA_FORMAT.md`.
 
-## Diagnóstico inicial dos BMP390
+## Aquisição inicial dos BMP390
 
 Os dois BMP390 permanecem definidos nos canais 2 e 3 do PCA9548A. Durante o
-`setup`, o firmware testa os endereços `0x77` e `0x76`, valida o `CHIP_ID`
-esperado `0x60` por meio da biblioteca `Adafruit BMP3XX 2.1.6`. Com ambos os
-sensores inicializados, executa no `setup` um diagnóstico estatístico de 100
-rodadas com período de 100 ms. As primeiras 10 rodadas são descartadas como
-aquecimento; para as restantes são impressos média, mínimo, máximo e
-desvio-padrão populacional de pressão e temperatura, além das falhas de leitura.
-Uma falha nesse diagnóstico não desativa a aquisição dos ICMs.
+`setup`, o firmware testa os endereços `0x77` e `0x76` e valida o `CHIP_ID`
+esperado `0x60` por meio da biblioteca `Adafruit BMP3XX 2.1.6`.
 
 Os canais 2 e 3, ambos no endereço `0x77`, foram confirmados na montagem física.
 Após o diagnóstico, o driver coloca os BMP390 em modo normal contínuo a 25 Hz.

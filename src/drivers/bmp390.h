@@ -8,11 +8,6 @@
 
 namespace pet::drivers {
 
-struct Bmp390Sample {
-  float temperatureC;
-  float pressurePa;
-};
-
 struct Bmp390RawSample {
   uint32_t pressure;
   uint32_t temperature;
@@ -23,7 +18,6 @@ class Bmp390 {
   Bmp390(Pca9548a& mux, TwoWire& wire, uint8_t muxChannel);
 
   bool begin();
-  bool read(Bmp390Sample& sample);
   bool startRawSampling25Hz();
   bool readRaw(Bmp390RawSample& sample);
 
