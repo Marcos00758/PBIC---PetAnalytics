@@ -137,7 +137,7 @@ Configuração inicial de bancada:
 - acelerômetro: faixa de `+/-2 g`, divisor 10, ODR aproximado de 102,3 Hz;
 - giroscópio: faixa de `+/-250 graus/s`, divisor 10, ODR de 100 Hz;
 - filtros digitais passa-baixas desativados;
-- magnetômetro AK09916 colocado em `SHUTDOWN` e não lido;
+- magnetômetro AK09916 configurado a 20 Hz apenas para diagnóstico no boot;
 - rodada de leitura dos três ICMs a 100 Hz, agendada com `micros()`;
 - saída USB binária não bloqueante em pacotes de 45 bytes.
 
@@ -160,6 +160,18 @@ O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
 sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
 `src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
 com o Python está documentado em `docs/DATA_FORMAT.md`.
+
+## Diagnóstico inicial dos AK09916
+
+A inicialização oficial da `Adafruit ICM20X 2.0.7` configura o controlador I2C
+auxiliar de cada ICM-20948, valida o AK09916 pelo registrador `WIA2=0x09` e
+mantém um proxy de nove bytes de `ST1` a `ST2`. O driver confirma novamente o
+`WIA2` por uma transação de um byte via `I2C_SLV4`, configura o magnetômetro a
+20 Hz e lê no boot os três eixos crus little-endian, `ST1` e `ST2`.
+
+O diagnóstico informa `DRDY` e overflow, mas os magnetômetros ainda não fazem
+parte do serviço de aquisição nem do pacote binário. O formato permanece com
+45 bytes e a aquisição principal continua em 100 Hz.
 
 ## Aquisição inicial dos BMP390
 

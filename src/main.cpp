@@ -46,8 +46,38 @@ bool initializeSensor(pet::drivers::Icm20948& icm) {
   printHexByte(icm.address());
   Serial.print(" WHO_AM_I=0x");
   printHexByte(icm.whoAmI());
-  Serial.println(" accel=+/-2g gyro=+/-250dps");
+  Serial.print(" AK09916_WIA2=0x");
+  printHexByte(icm.magnetometerWhoAmI());
+  Serial.println(" accel=+/-2g gyro=+/-250dps mag=20Hz");
   return true;
+}
+
+void diagnoseMagnetometer(pet::drivers::Icm20948& icm) {
+  pet::drivers::Ak09916RawSample sample{};
+  Serial.print("AK09916 channel ");
+  Serial.print(icm.muxChannel());
+  Serial.print(" WIA2=0x");
+  printHexByte(icm.magnetometerWhoAmI());
+
+  if (!icm.readMagnetometerRaw(sample)) {
+    Serial.println(" raw_read=FAILED");
+    return;
+  }
+
+  Serial.print(" ST1=0x");
+  printHexByte(sample.status1);
+  Serial.print(" ST2=0x");
+  printHexByte(sample.status2);
+  Serial.print(" raw=");
+  Serial.print(sample.magnetic.x);
+  Serial.print(',');
+  Serial.print(sample.magnetic.y);
+  Serial.print(',');
+  Serial.print(sample.magnetic.z);
+  Serial.print(" data_ready=");
+  Serial.print(sample.dataReady ? "yes" : "no");
+  Serial.print(" overflow=");
+  Serial.println(sample.overflow ? "yes" : "no");
 }
 
 bool initializeBmp(pet::drivers::Bmp390& bmp) {
@@ -97,6 +127,12 @@ void setup() {
   bool sensorsReady = true;
   for (pet::drivers::Icm20948* icm : icms) {
     sensorsReady = initializeSensor(*icm) && sensorsReady;
+  }
+  if (sensorsReady) {
+    delay(60);
+    for (pet::drivers::Icm20948* icm : icms) {
+      diagnoseMagnetometer(*icm);
+    }
   }
   bool bmpsReady = true;
   for (pet::drivers::Bmp390* bmp : bmps) {

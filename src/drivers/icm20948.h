@@ -26,6 +26,14 @@ struct Icm20948RawSample {
   Vector3i16 gyro;
 };
 
+struct Ak09916RawSample {
+  Vector3i16 magnetic;
+  uint8_t status1;
+  uint8_t status2;
+  bool dataReady;
+  bool overflow;
+};
+
 struct Icm20948Sample {
   uint32_t timestampUs;
   Vector3f accelerationMps2;
@@ -40,11 +48,13 @@ class Icm20948 {
   bool begin();
   bool read(Icm20948Sample& sample);
   bool readRaw(Icm20948RawSample& sample);
+  bool readMagnetometerRaw(Ak09916RawSample& sample);
 
   bool initialized() const { return initialized_; }
   uint8_t muxChannel() const { return muxChannel_; }
   uint8_t address() const { return address_; }
   uint8_t whoAmI() const { return whoAmI_; }
+  uint8_t magnetometerWhoAmI() const { return magnetometerWhoAmI_; }
 
  private:
   bool detectAddress();
@@ -53,6 +63,8 @@ class Icm20948 {
   bool readRegister(uint8_t address, uint8_t reg, uint8_t& value);
   bool readRegisters(uint8_t address, uint8_t startRegister, uint8_t* data,
                      size_t length);
+  bool readAuxiliaryRegister(uint8_t slaveAddress, uint8_t registerAddress,
+                             uint8_t& value);
   bool configure();
 
   Pca9548a& mux_;
@@ -62,6 +74,7 @@ class Icm20948 {
   Adafruit_ICM20948 sensor_;
   uint8_t address_ = 0;
   uint8_t whoAmI_ = 0;
+  uint8_t magnetometerWhoAmI_ = 0;
   bool initialized_ = false;
 };
 
