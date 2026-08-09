@@ -50,3 +50,14 @@ Também é possível informar a porta e o arquivo:
 python python/capture_serial.py --port COM3 --output data/teste_icm.bin
 python python/parse_data.py data/teste_icm.bin
 ```
+
+Para validar CRC, sequencia, frequencia, periodo, jitter e perdas, e gerar o
+grafico 2 x 3 dos tres ICMs:
+
+```powershell
+python python/analyze_imu.py data/teste_icm.bin
+```
+
+O grafico e salvo ao lado da captura como `.png` e tambem e aberto na tela. Em
+ambientes sem interface grafica, use `--no-show`; `--output` permite escolher o
+caminho da imagem.

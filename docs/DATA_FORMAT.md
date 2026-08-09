@@ -93,3 +93,15 @@ SHA-256 e contadores do parser para rastreabilidade.
 
 Os arquivos criados em `data/` sao capturas de bancada no computador e nao
 alteram a futura organizacao de sessoes do cartao SD.
+
+## Validacao e visualizacao
+
+`python/analyze_imu.py` usa apenas pacotes que passaram por magic e CRC. A
+ferramenta informa pacotes validos, CRCs invalidos, bytes descartados, gaps de
+sequencia, frequencia efetiva, periodo medio e limites dos intervalos. O jitter
+e definido como o desvio-padrao populacional dos intervalos entre timestamps,
+em milissegundos; ele nao deve ser confundido com o periodo medio de 10 ms.
+
+O grafico gerado tem duas linhas e tres colunas. Cada coluna representa um ICM;
+acelerometros aparecem acima e giroscopios abaixo, ja convertidos para unidades
+fisicas pelo Python. Essa ferramenta nao altera o fluxo bruto nem o pacote v1.
