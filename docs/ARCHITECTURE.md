@@ -142,9 +142,9 @@ Configuração inicial de bancada:
 - saída USB binária não bloqueante em pacotes de 45 bytes.
 
 A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
-desliga logo depois da inicialização porque o magnetômetro não faz parte desta
-etapa. As faixas de `+/-2 g` e `+/-250 graus/s` priorizam resolução no teste de
-bancada e devem ser revistas após testes de saturação com movimento real.
+mantém em modo contínuo a 20 Hz. As faixas de `+/-2 g` e `+/-250 graus/s`
+priorizam resolução no teste de bancada e devem ser revistas após testes de
+saturação com movimento real.
 
 Depois de selecionar um canal, o driver aguarda 80 microssegundos antes de
 acessar o sensor. Esse tempo veio da experiência com o hardware legado e ainda
@@ -169,9 +169,16 @@ mantém um proxy de nove bytes de `ST1` a `ST2`. O driver confirma novamente o
 `WIA2` por uma transação de um byte via `I2C_SLV4`, configura o magnetômetro a
 20 Hz e lê no boot os três eixos crus little-endian, `ST1` e `ST2`.
 
-O diagnóstico informa `DRDY` e overflow, mas os magnetômetros ainda não fazem
-parte do serviço de aquisição nem do pacote binário. O formato permanece com
-45 bytes e a aquisição principal continua em 100 Hz.
+O serviço de aquisição consulta o proxy dos três magnetômetros a cada cinco
+rodadas IMU, mantendo os últimos eixos crus válidos em cache. Como a leitura
+automática do proxy inclui `ST2` e pode limpar `DRDY` antes da consulta da
+Teensy, uma amostra é considerada nova quando `DRDY` foi capturado ou quando o
+trio cru mudou em relação ao cache. Leituras com overflow são rejeitadas.
+
+Existem contadores separados por magnetômetro para falha I2C, atualização
+aceita, ausência de novidade, overrun (`DOR`) e overflow (`HOFL`). Os valores
+ainda não participam do pacote binário: o formato permanece com 45 bytes e a
+aquisição principal continua em 100 Hz.
 
 ## Aquisição inicial dos BMP390
 

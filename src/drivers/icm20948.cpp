@@ -25,6 +25,7 @@ constexpr uint8_t kI2cSlave4DoneMask = 0x40;
 constexpr uint8_t kI2cSlaveEnable = 0x80;
 constexpr uint8_t kAuxiliaryReadBit = 0x80;
 constexpr uint8_t kAk09916DataReadyMask = 0x01;
+constexpr uint8_t kAk09916DataOverrunMask = 0x02;
 constexpr uint8_t kAk09916OverflowMask = 0x08;
 constexpr uint8_t kAuxiliaryTransactionPollLimit = 100;
 constexpr float kAccelScaleMps2PerCount = (2.0f * 9.80665f) / 32767.5f;
@@ -145,6 +146,7 @@ bool Icm20948::readMagnetometerRaw(Ak09916RawSample& sample) {
                      decodeLittleEndianInt16(&data[5])};
   sample.status2 = data[8];
   sample.dataReady = (sample.status1 & kAk09916DataReadyMask) != 0;
+  sample.dataOverrun = (sample.status1 & kAk09916DataOverrunMask) != 0;
   sample.overflow = (sample.status2 & kAk09916OverflowMask) != 0;
   return true;
 }

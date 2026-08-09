@@ -26,6 +26,7 @@ constexpr uint8_t kIcmCandidateAddresses[] = {0x69, 0x68};
 constexpr uint8_t kIcmWhoAmIRegister = 0x00;
 constexpr uint8_t kIcmRegisterBankSelect = 0x7F;
 constexpr uint8_t kIcmExpectedWhoAmI = 0xEA;
+constexpr uint32_t kMagSampleRateHz = 20;
 
 // Internal sensor ODRs: accel ~=102.3 Hz and gyro =100 Hz.
 constexpr uint16_t kIcmAccelRateDivisor = 10;
@@ -35,8 +36,12 @@ constexpr uint32_t kImuSampleRateHz = 100;
 constexpr uint32_t kImuSamplePeriodUs = 1000000UL / kImuSampleRateHz;
 constexpr uint32_t kBmpSamplesPerImuSample =
     kImuSampleRateHz / kBmpSampleRateHz;
+constexpr uint32_t kMagSamplesPerImuSample =
+    kImuSampleRateHz / kMagSampleRateHz;
 static_assert(kImuSampleRateHz % kBmpSampleRateHz == 0,
               "BMP rate must divide IMU rate");
+static_assert(kImuSampleRateHz % kMagSampleRateHz == 0,
+              "magnetometer rate must divide IMU rate");
 static_assert(1000000UL % kImuSampleRateHz == 0,
               "IMU sample period must be an integer number of microseconds");
 

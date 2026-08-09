@@ -17,6 +17,11 @@ struct AcquisitionCounters {
   uint32_t i2cFailures[data::kIcmCount] = {0, 0, 0};
   uint32_t bmpI2cFailures[kBmpCount] = {0, 0};
   uint32_t bmpUpdates[kBmpCount] = {0, 0};
+  uint32_t magI2cFailures[data::kIcmCount] = {0, 0, 0};
+  uint32_t magUpdates[data::kIcmCount] = {0, 0, 0};
+  uint32_t magNoNewData[data::kIcmCount] = {0, 0, 0};
+  uint32_t magDataOverruns[data::kIcmCount] = {0, 0, 0};
+  uint32_t magOverflows[data::kIcmCount] = {0, 0, 0};
   uint32_t usbDroppedPackets = 0;
 };
 
@@ -25,7 +30,8 @@ class ImuAcquisition {
   ImuAcquisition(drivers::Icm20948& icm0, drivers::Icm20948& icm1,
                  drivers::Icm20948& icm2, drivers::Bmp390& bmp0,
                  drivers::Bmp390& bmp1, uint32_t samplePeriodUs,
-                 uint32_t bmpSamplesPerImuSample);
+                 uint32_t bmpSamplesPerImuSample,
+                 uint32_t magSamplesPerImuSample);
 
   void start(uint32_t nowUs);
   bool poll(data::ImuPacket& packet);
@@ -38,8 +44,12 @@ class ImuAcquisition {
   drivers::Bmp390* bmps_[kBmpCount];
   const uint32_t samplePeriodUs_;
   const uint32_t bmpSamplesPerImuSample_;
+  const uint32_t magSamplesPerImuSample_;
   uint32_t bmpPressureRaw_[kBmpCount] = {0, 0};
   uint32_t bmpTemperatureRaw_[kBmpCount] = {0, 0};
+  drivers::Vector3i16 magRaw_[data::kIcmCount]{};
+  uint32_t magUpdatedAtUs_[data::kIcmCount] = {0, 0, 0};
+  bool magCacheValid_[data::kIcmCount] = {false, false, false};
   uint32_t nextSampleUs_ = 0;
   uint16_t sequence_ = 0;
   bool started_ = false;

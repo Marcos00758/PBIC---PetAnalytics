@@ -22,7 +22,8 @@ pet::drivers::Bmp390 bmp1(mux, Wire, pet::config::kBmp1Channel);
 pet::drivers::Bmp390* const bmps[] = {&bmp0, &bmp1};
 pet::services::ImuAcquisition acquisition(
     icm0, icm1, icm2, bmp0, bmp1, pet::config::kImuSamplePeriodUs,
-    pet::config::kBmpSamplesPerImuSample);
+    pet::config::kBmpSamplesPerImuSample,
+    pet::config::kMagSamplesPerImuSample);
 
 bool acquisitionReady = false;
 
@@ -76,6 +77,8 @@ void diagnoseMagnetometer(pet::drivers::Icm20948& icm) {
   Serial.print(sample.magnetic.z);
   Serial.print(" data_ready=");
   Serial.print(sample.dataReady ? "yes" : "no");
+  Serial.print(" overrun=");
+  Serial.print(sample.dataOverrun ? "yes" : "no");
   Serial.print(" overflow=");
   Serial.println(sample.overflow ? "yes" : "no");
 }
@@ -161,7 +164,9 @@ void setup() {
   Serial.print(" sample_rate_hz=");
   Serial.print(pet::config::kImuSampleRateHz);
   Serial.print(" bmp_rate_hz=");
-  Serial.println(pet::config::kBmpSampleRateHz);
+  Serial.print(pet::config::kBmpSampleRateHz);
+  Serial.print(" mag_rate_hz=");
+  Serial.println(pet::config::kMagSampleRateHz);
 
   acquisition.start(micros());
   acquisitionReady = true;

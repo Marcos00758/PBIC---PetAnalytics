@@ -31,6 +31,7 @@ struct Ak09916RawSample {
   uint8_t status1;
   uint8_t status2;
   bool dataReady;
+  bool dataOverrun;
   bool overflow;
 };
 
