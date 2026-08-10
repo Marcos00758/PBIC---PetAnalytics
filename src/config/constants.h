@@ -14,6 +14,7 @@ constexpr uint16_t kPcaChannelSettleUs = 80;
 constexpr uint8_t kIcm0Channel = 0;
 constexpr uint8_t kIcm1Channel = 1;
 constexpr uint8_t kIcm2Channel = 4;
+constexpr uint8_t kIcmSensorCount = 3;
 
 constexpr uint8_t kBmp0Channel = 2;
 constexpr uint8_t kBmp1Channel = 3;
@@ -42,10 +43,13 @@ static_assert(kImuSampleRateHz % kBmpSampleRateHz == 0,
               "BMP rate must divide IMU rate");
 static_assert(kImuSampleRateHz % kMagSampleRateHz == 0,
               "magnetometer rate must divide IMU rate");
+static_assert(kMagSamplesPerImuSample >= kIcmSensorCount,
+              "magnetometer schedule needs one phase per ICM");
 static_assert(1000000UL % kImuSampleRateHz == 0,
               "IMU sample period must be an integer number of microseconds");
 
 constexpr uint16_t kImuPacketMagic = 0xAA55;
+constexpr uint8_t kImuPacketVersion = 2;
 constexpr uint8_t kCrc8Polynomial = 0x07;
 
 }  // namespace pet::config

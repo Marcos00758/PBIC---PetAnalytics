@@ -15,6 +15,13 @@ void appendSampleValues(const drivers::Icm20948RawSample& sample,
   values[5] = sample.gyro.z;
 }
 
+void appendMagnetometerValues(const drivers::Vector3i16& sample,
+                              int16_t* values) {
+  values[6] = sample.x;
+  values[7] = sample.y;
+  values[8] = sample.z;
+}
+
 bool vectorsEqual(const drivers::Vector3i16& left,
                   const drivers::Vector3i16& right) {
   return left.x == right.x && left.y == right.y && left.z == right.z;
@@ -67,7 +74,7 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
       roundSucceeded = false;
       continue;
     }
-    appendSampleValues(sample, &values[i * data::kAxesPerIcm]);
+    appendSampleValues(sample, &values[i * data::kValuesPerIcm]);
   }
 
   if (!roundSucceeded) {
@@ -89,9 +96,15 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
     }
   }
 
-  if (magSamplesPerImuSample_ > 0 &&
-      packetSequence % magSamplesPerImuSample_ == 0) {
+  if (magSamplesPerImuSample_ > 0) {
     for (size_t i = 0; i < data::kIcmCount; ++i) {
+      const bool cacheNeedsPriming = !magCacheValid_[i];
+      const bool sensorIsDue =
+          packetSequence % magSamplesPerImuSample_ == i;
+      if (!cacheNeedsPriming && !sensorIsDue) {
+        continue;
+      }
+
       drivers::Ak09916RawSample sample{};
       if (!icms_[i]->readMagnetometerRaw(sample)) {
         ++counters_.magI2cFailures[i];
@@ -117,6 +130,11 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
       magCacheValid_[i] = true;
       ++counters_.magUpdates[i];
     }
+  }
+
+  for (size_t i = 0; i < data::kIcmCount; ++i) {
+    appendMagnetometerValues(magRaw_[i],
+                             &values[i * data::kValuesPerIcm]);
   }
 
   utils::buildImuPacket(packet, nowUs, packetSequence, values);

@@ -6,8 +6,8 @@
 namespace pet::data {
 
 constexpr size_t kIcmCount = 3;
-constexpr size_t kAxesPerIcm = 6;
-constexpr size_t kImuValueCount = kIcmCount * kAxesPerIcm;
+constexpr size_t kValuesPerIcm = 9;
+constexpr size_t kImuValueCount = kIcmCount * kValuesPerIcm;
 
 #pragma pack(push, 1)
 struct ImuPacket {
@@ -19,7 +19,7 @@ struct ImuPacket {
 };
 #pragma pack(pop)
 
-static_assert(sizeof(ImuPacket) == 45, "Unexpected IMU packet size");
-static_assert(offsetof(ImuPacket, crc8) == 44, "Unexpected CRC offset");
+static_assert(sizeof(ImuPacket) == 63, "Unexpected IMU packet size");
+static_assert(offsetof(ImuPacket, crc8) == 62, "Unexpected CRC offset");
 
 }  // namespace pet::data

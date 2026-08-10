@@ -11,7 +11,7 @@ from parse_data import MAGIC, crc8, parse_stream
 
 
 def make_packet(timestamp_us: int, sequence: int) -> bytes:
-    without_crc = struct.pack("<HIH18h", MAGIC, timestamp_us, sequence, *([0] * 18))
+    without_crc = struct.pack("<HIH27h", MAGIC, timestamp_us, sequence, *([0] * 27))
     return without_crc + bytes((crc8(without_crc),))
 
 
@@ -42,7 +42,7 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertIn("crc_failures=1", report)
         self.assertIn("sequence_gaps=1", report)
 
-    def test_generates_six_panel_png(self):
+    def test_generates_imu_and_magnetometer_pngs(self):
         import matplotlib
 
         matplotlib.use("Agg")
@@ -56,8 +56,12 @@ class AnalyzeImuTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "capture.png"
-            plot_capture(packets, stats, timing, output, show=False)
+            mag_output = Path(directory) / "capture_mag.png"
+            plot_capture(
+                packets, stats, timing, output, show=False, mag_output=mag_output
+            )
             self.assertGreater(output.stat().st_size, 0)
+            self.assertGreater(mag_output.stat().st_size, 0)
 
 
 if __name__ == "__main__":

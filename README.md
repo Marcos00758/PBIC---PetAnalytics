@@ -25,8 +25,9 @@ Python. A gravação no cartão SD será adicionada em uma etapa posterior.
 ## Estado atual
 
 Os três ICM-20948 nos canais 0, 1 e 4 do PCA9548A são lidos a 100 Hz. O firmware
-transmite pela USB pacotes binários de 45 bytes com timestamp, sequência, 18
-valores crus `int16` e CRC-8. O formato completo está em
+transmite pela USB pacotes binários de 63 bytes com timestamp, sequência, 27
+valores crus `int16` de acelerômetro, giroscópio e magnetômetro, além de CRC-8.
+O formato completo está em
 `docs/DATA_FORMAT.md`.
 
 ## Captura de bancada
@@ -52,7 +53,7 @@ python python/parse_data.py data/teste_icm.bin
 ```
 
 Para validar CRC, sequencia, frequencia, periodo, jitter e perdas, e gerar o
-grafico 2 x 3 dos tres ICMs:
+grafico 2 x 3 de acelerometro/giroscopio e um grafico separado dos magnetometros:
 
 ```powershell
 python python/analyze_imu.py data/teste_icm.bin

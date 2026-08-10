@@ -7,6 +7,7 @@ A Teensy substitui completamente a antiga Nicla Voice.
 
 Não existem mais:
 
+
 NDP120
 BMI270 interno
 BMM150 interno
@@ -19,7 +20,7 @@ pinos - portas
 
 - PCA9548A:
 Teensy - PCA9548A
-18	- SDA
+18	- SDAW
 19	- SCL
 3V3	- VCC
 GND	- GND

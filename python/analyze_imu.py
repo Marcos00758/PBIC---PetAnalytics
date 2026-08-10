@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from parse_data import ParseStats, ParsedPacket, elapsed_us, parse_stream
+from parse_data import (
+    PACKET_SIZE,
+    MagnetometerCalibration,
+    ParseStats,
+    ParsedPacket,
+    elapsed_us,
+    parse_stream,
+)
 
 
 @dataclass(frozen=True)
@@ -45,6 +53,8 @@ def calculate_timing(packets: list[ParsedPacket]) -> TimingStats | None:
 
 def format_validation(stats: ParseStats, timing: TimingStats | None) -> str:
     lines = [
+        f"packet_size={PACKET_SIZE}",
+        f"stream_bytes={stats.valid_packets * PACKET_SIZE}",
         f"valid_packets={stats.valid_packets}",
         f"crc_failures={stats.crc_failures}",
         f"sequence_gaps={stats.sequence_gaps}",
@@ -60,9 +70,33 @@ def format_validation(stats: ParseStats, timing: TimingStats | None) -> str:
                 f"jitter_std_ms={timing.jitter_std_ms:.3f}",
                 f"min_period_ms={timing.min_period_ms:.3f}",
                 f"max_period_ms={timing.max_period_ms:.3f}",
+                f"effective_usb_bytes_per_s={timing.effective_rate_hz * PACKET_SIZE:.1f}",
             )
         )
     return "\n".join(lines)
+
+
+def load_magnetometer_calibrations(
+    path: Path | None,
+) -> tuple[MagnetometerCalibration, ...]:
+    if path is None:
+        return (MagnetometerCalibration(),) * 3
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    calibrations = []
+    for sensor in range(3):
+        entry = document.get(f"icm{sensor}", {})
+        hard_iron = tuple(float(value) for value in entry.get("hard_iron_ut", (0, 0, 0)))
+        matrix = tuple(
+            tuple(float(value) for value in row)
+            for row in entry.get(
+                "soft_iron_matrix", ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+            )
+        )
+        if len(hard_iron) != 3 or len(matrix) != 3 or any(len(row) != 3 for row in matrix):
+            raise ValueError(f"invalid magnetometer calibration for icm{sensor}")
+        calibrations.append(MagnetometerCalibration(hard_iron, matrix))
+    return tuple(calibrations)
 
 
 def plot_capture(
@@ -71,6 +105,8 @@ def plot_capture(
     timing: TimingStats,
     output: Path | None,
     show: bool,
+    mag_output: Path | None = None,
+    mag_calibrations: tuple[MagnetometerCalibration, ...] | None = None,
 ) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -82,7 +118,9 @@ def plot_capture(
 
     first_timestamp = packets[0].packet.timestamp_us
     times_s = [elapsed_us(first_timestamp, item.packet.timestamp_us) / 1_000_000 for item in packets]
-    physical = [item.packet.physical_values() for item in packets]
+    physical = [
+        item.packet.physical_values(mag_calibrations) for item in packets
+    ]
 
     figure, axes = plt.subplots(2, 3, figsize=(18, 8), sharex=True)
     for sensor in range(3):
@@ -113,16 +151,48 @@ def plot_capture(
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
         figure.savefig(output, dpi=160, bbox_inches="tight")
+
+    mag_figure, mag_axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True)
+    for sensor, mag_axis in enumerate(mag_axes):
+        for axis in ("x", "y", "z"):
+            mag_axis.plot(
+                times_s,
+                [row[f"icm{sensor}_m{axis}"] for row in physical],
+                label=f"m{axis}",
+                linewidth=1,
+            )
+        mag_axis.set_title(f"ICM#{sensor} - Magnetometro")
+        mag_axis.set_ylabel("Campo magnetico (uT)")
+        mag_axis.set_xlabel("Tempo (s)")
+        mag_axis.grid(True, alpha=0.45)
+        mag_axis.legend()
+    mag_figure.suptitle(
+        f"AK09916 Triple - cache 20 Hz em pacotes de 100 Hz | "
+        f"{stats.valid_packets} pacotes"
+    )
+    mag_figure.tight_layout(rect=(0, 0, 1, 0.93))
+    if mag_output is not None:
+        mag_output.parent.mkdir(parents=True, exist_ok=True)
+        mag_figure.savefig(mag_output, dpi=160, bbox_inches="tight")
     if show:
         plt.show()
     else:
         plt.close(figure)
+        plt.close(mag_figure)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="raw .bin capture")
     parser.add_argument("--output", type=Path, help="PNG output path")
+    parser.add_argument(
+        "--mag-output", type=Path, help="magnetometer PNG output path"
+    )
+    parser.add_argument(
+        "--mag-calibration",
+        type=Path,
+        help="JSON containing hard-iron offsets and soft-iron matrices",
+    )
     parser.add_argument("--no-show", action="store_true", help="do not open the plot window")
     args = parser.parse_args()
 
@@ -133,11 +203,24 @@ def main() -> None:
         raise SystemExit("at least two valid packets are required to plot a capture")
 
     output = args.output or args.input.with_suffix(".png")
+    mag_output = args.mag_output or args.input.with_name(
+        f"{args.input.stem}_mag.png"
+    )
     try:
-        plot_capture(packets, stats, timing, output, not args.no_show)
-    except RuntimeError as exc:
+        calibrations = load_magnetometer_calibrations(args.mag_calibration)
+        plot_capture(
+            packets,
+            stats,
+            timing,
+            output,
+            not args.no_show,
+            mag_output,
+            calibrations,
+        )
+    except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         raise SystemExit(str(exc)) from exc
     print(f"plot_file={output.resolve()}")
+    print(f"mag_plot_file={mag_output.resolve()}")
 
 
 if __name__ == "__main__":

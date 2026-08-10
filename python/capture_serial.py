@@ -18,7 +18,7 @@ except ImportError as exc:
         "pyserial is required; install it with: pip install -r python/requirements.txt"
     ) from exc
 
-from parse_data import PACKET_SIZE, crc8, elapsed_us, parse_stream, summarize
+from parse_data import PACKET_SIZE, PACKET_VERSION, elapsed_us, parse_stream, summarize
 
 DEFAULT_DURATION_SECONDS = 10.0
 SERIAL_BAUD = 115200
@@ -102,6 +102,7 @@ def write_capture(
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "port": port_name,
         "requested_duration_s": duration_seconds,
+        "packet_version": PACKET_VERSION,
         "packet_size": PACKET_SIZE,
         "raw_bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),

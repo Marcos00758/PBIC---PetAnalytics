@@ -161,6 +161,8 @@ void setup() {
 
   Serial.print("BINARY_STREAM_START packet_size=");
   Serial.print(sizeof(pet::data::ImuPacket));
+  Serial.print(" packet_version=");
+  Serial.print(pet::config::kImuPacketVersion);
   Serial.print(" sample_rate_hz=");
   Serial.print(pet::config::kImuSampleRateHz);
   Serial.print(" bmp_rate_hz=");

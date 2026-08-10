@@ -1,4 +1,4 @@
-"""Parser for the 45-byte PBIC IMU packet stream."""
+"""Parser for the 63-byte PBIC IMU packet stream."""
 
 from __future__ import annotations
 
@@ -9,18 +9,40 @@ from pathlib import Path
 from typing import Iterable
 
 MAGIC = 0xAA55
+PACKET_VERSION = 2
 MAGIC_BYTES = struct.pack("<H", MAGIC)
-PACKET_STRUCT = struct.Struct("<HIH18hB")
+PACKET_STRUCT = struct.Struct("<HIH27hB")
 PACKET_SIZE = PACKET_STRUCT.size
 
 VALUE_NAMES = tuple(
     f"icm{sensor}_{axis}"
     for sensor in range(3)
-    for axis in ("ax", "ay", "az", "gx", "gy", "gz")
+    for axis in ("ax", "ay", "az", "gx", "gy", "gz", "mx", "my", "mz")
 )
 
 ACCEL_MPS2_PER_COUNT = (2.0 * 9.80665) / 32767.5
 GYRO_DPS_PER_COUNT = 250.0 / 32768.0
+MAG_UT_PER_COUNT = 0.15
+
+
+@dataclass(frozen=True)
+class MagnetometerCalibration:
+    hard_iron_ut: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    soft_iron_matrix: tuple[
+        tuple[float, float, float],
+        tuple[float, float, float],
+        tuple[float, float, float],
+    ] = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+    def apply(self, raw: tuple[int, int, int]) -> tuple[float, float, float]:
+        centered = tuple(
+            value * MAG_UT_PER_COUNT - offset
+            for value, offset in zip(raw, self.hard_iron_ut)
+        )
+        return tuple(
+            sum(coefficient * value for coefficient, value in zip(row, centered))
+            for row in self.soft_iron_matrix
+        )
 
 
 @dataclass(frozen=True)
@@ -29,12 +51,24 @@ class ImuPacket:
     sequence: int
     values: tuple[int, ...]
 
-    def physical_values(self) -> dict[str, float]:
+    def physical_values(
+        self,
+        mag_calibrations: tuple[MagnetometerCalibration, ...] | None = None,
+    ) -> dict[str, float]:
         converted: dict[str, float] = {}
-        for index, (name, value) in enumerate(zip(VALUE_NAMES, self.values)):
-            axis_index = index % 6
-            scale = ACCEL_MPS2_PER_COUNT if axis_index < 3 else GYRO_DPS_PER_COUNT
-            converted[name] = value * scale
+        calibrations = mag_calibrations or (MagnetometerCalibration(),) * 3
+        if len(calibrations) != 3:
+            raise ValueError("three magnetometer calibrations are required")
+
+        for sensor in range(3):
+            base = sensor * 9
+            for axis, value in zip(("x", "y", "z"), self.values[base : base + 3]):
+                converted[f"icm{sensor}_a{axis}"] = value * ACCEL_MPS2_PER_COUNT
+            for axis, value in zip(("x", "y", "z"), self.values[base + 3 : base + 6]):
+                converted[f"icm{sensor}_g{axis}"] = value * GYRO_DPS_PER_COUNT
+            magnetic = calibrations[sensor].apply(self.values[base + 6 : base + 9])
+            for axis, value in zip(("x", "y", "z"), magnetic):
+                converted[f"icm{sensor}_m{axis}"] = value
         return converted
 
 

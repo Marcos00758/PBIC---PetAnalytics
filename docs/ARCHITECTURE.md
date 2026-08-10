@@ -137,9 +137,9 @@ Configuração inicial de bancada:
 - acelerômetro: faixa de `+/-2 g`, divisor 10, ODR aproximado de 102,3 Hz;
 - giroscópio: faixa de `+/-250 graus/s`, divisor 10, ODR de 100 Hz;
 - filtros digitais passa-baixas desativados;
-- magnetômetro AK09916 configurado a 20 Hz apenas para diagnóstico no boot;
+- magnetômetro AK09916 configurado e adquirido a 20 Hz com cache;
 - rodada de leitura dos três ICMs a 100 Hz, agendada com `micros()`;
-- saída USB binária não bloqueante em pacotes de 45 bytes.
+- saída USB binária não bloqueante em pacotes de 63 bytes.
 
 A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
 mantém em modo contínuo a 20 Hz. As faixas de `+/-2 g` e `+/-250 graus/s`
@@ -169,16 +169,27 @@ mantém um proxy de nove bytes de `ST1` a `ST2`. O driver confirma novamente o
 `WIA2` por uma transação de um byte via `I2C_SLV4`, configura o magnetômetro a
 20 Hz e lê no boot os três eixos crus little-endian, `ST1` e `ST2`.
 
-O serviço de aquisição consulta o proxy dos três magnetômetros a cada cinco
-rodadas IMU, mantendo os últimos eixos crus válidos em cache. Como a leitura
+O serviço de aquisição consulta o proxy de cada magnetômetro uma vez a cada
+cinco rodadas IMU, em fases diferentes, mantendo os últimos eixos crus válidos
+
+
+
+
+
+
+
+
+
+em cache. Como a leitura
 automática do proxy inclui `ST2` e pode limpar `DRDY` antes da consulta da
 Teensy, uma amostra é considerada nova quando `DRDY` foi capturado ou quando o
 trio cru mudou em relação ao cache. Leituras com overflow são rejeitadas.
 
 Existem contadores separados por magnetômetro para falha I2C, atualização
-aceita, ausência de novidade, overrun (`DOR`) e overflow (`HOFL`). Os valores
-ainda não participam do pacote binário: o formato permanece com 45 bytes e a
-aquisição principal continua em 100 Hz.
+aceita, ausência de novidade, overrun (`DOR`) e overflow (`HOFL`). Os nove
+valores crus entram no pacote v2, que possui 63 bytes. As consultas dos três
+AK09916 são distribuídas em fases diferentes das rodadas de 100 Hz, enquanto o
+último valor válido de cada sensor é repetido a partir do cache.
 
 ## Aquisição inicial dos BMP390
 
@@ -199,6 +210,10 @@ pela inicialização e validação, enquanto a aquisição contínua usa os
 registradores oficiais `PWR_CTRL` (`0x1B`), `OSR` (`0x1C`), `ODR` (`0x1D`) e o
 bloco de dados `0x04` a `0x09`. Não há `float` nesse caminho de aquisição.
 
-O cache ainda não participa do pacote binário de 45 bytes. Portanto,
-`docs/DATA_FORMAT.md` e o parser Python permanecem inalterados até a próxima
-mudança formal de formato.
+O cache dos BMP390 ainda não participa do pacote binário v2 de 63 bytes. Sua
+
+
+
+
+
+inclusão exigirá outra mudança formal em `docs/DATA_FORMAT.md` e no parser.
