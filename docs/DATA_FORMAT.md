@@ -79,8 +79,9 @@ consultas dos tres sensores sao distribuidas por fases diferentes das rodadas
 de 100 Hz para reduzir jitter. O ultimo valor
 valido e repetido no pacote; repeticoes sao esperadas.
 
-`python/analyze_imu.py` informa mudancas aceitas, taxa efetiva observada,
-intervalos entre mudancas e faixa do modulo magnetico. Para uma calibracao
+`python/analyze_imu.py` informa mudancas observadas, taxa de mudanca dos valores,
+intervalos entre mudancas e faixa do modulo magnetico. Essa taxa e um limite
+inferior da ODR, pois atualizacoes reais podem repetir a mesma contagem. Para uma calibracao
 inicial, grave uma rotacao lenta e ampla nos tres eixos e execute:
 
 ```powershell
@@ -135,7 +136,9 @@ A 100 Hz, o fluxo nominal e de 7900 bytes/s. Uma janela de 10 segundos sem
 perdas contem 1000 pacotes e 79000 bytes.
 
 `python/capture_serial.py` salva uma janela semiaberta de tempo do sensor e
-preserva os bytes recebidos. O `.bin.json` registra versao, tamanho, porta,
+preserva os bytes recebidos. A captura valida apenas os novos pacotes recebidos,
+sem reprocessar todo o buffer a cada leitura, para sustentar janelas maiores sem
+perder bytes por carga excessiva no computador. O `.bin.json` registra versao, tamanho, porta,
 horario, SHA-256 e contadores.
 
 `python/parse_data.py` e a entrada principal de `python/analyze_imu.py`

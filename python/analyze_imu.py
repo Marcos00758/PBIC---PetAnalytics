@@ -234,7 +234,7 @@ def format_sensor_diagnostics(
             f"icm{sensor}_near_limit accel={diagnostics.accel_near_limit[sensor]} "
             f"gyro={diagnostics.gyro_near_limit[sensor]} "
             f"mag_changes={diagnostics.mag_changes[sensor]} "
-            f"mag_effective_update_hz={update_rate:.3f} "
+            f"mag_change_rate_hz={update_rate:.3f} "
             f"mag_interval_packets={diagnostics.mag_min_interval_packets[sensor]}.."
             f"{diagnostics.mag_max_interval_packets[sensor]} "
             f"mag_norm_ut={diagnostics.mag_norm_min_ut[sensor]:.2f}.."
@@ -248,7 +248,7 @@ def format_sensor_diagnostics(
             f"{diagnostics.bmp_temperature_ranges[sensor][0]}.."
             f"{diagnostics.bmp_temperature_ranges[sensor][1]} "
             f"changes={diagnostics.bmp_changes[sensor]} "
-            f"effective_update_hz={update_rate:.3f} "
+            f"change_rate_hz={update_rate:.3f} "
             f"invalid_packets={diagnostics.bmp_invalid_packets[sensor]}"
         )
     return "\n".join(lines)
