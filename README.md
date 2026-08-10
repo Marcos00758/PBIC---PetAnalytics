@@ -25,8 +25,8 @@ Python. A gravação no cartão SD será adicionada em uma etapa posterior.
 ## Estado atual
 
 Os três ICM-20948 nos canais 0, 1 e 4 do PCA9548A são lidos a 100 Hz. O firmware
-transmite pela USB pacotes binários de 63 bytes com timestamp, sequência, 27
-valores crus `int16` de acelerômetro, giroscópio e magnetômetro, além de CRC-8.
+transmite pela USB pacotes binários de 79 bytes com timestamp, sequência, 27
+valores crus `int16` dos ICMs, quatro valores `uint32` crus dos BMP390 e CRC-8.
 O formato completo está em
 `docs/DATA_FORMAT.md`.
 
@@ -53,7 +53,7 @@ python python/parse_data.py data/teste_icm.bin
 ```
 
 Para validar CRC, sequencia, frequencia, periodo, jitter e perdas, e gerar o
-grafico 2 x 3 de acelerometro/giroscopio e um grafico separado dos magnetometros:
+graficos separados para acelerometro/giroscopio, magnetometros e BMP390 crus:
 
 ```powershell
 python python/analyze_imu.py data/teste_icm.bin
@@ -62,3 +62,9 @@ python python/analyze_imu.py data/teste_icm.bin
 O grafico e salvo ao lado da captura como `.png` e tambem e aberto na tela. Em
 ambientes sem interface grafica, use `--no-show`; `--output` permite escolher o
 caminho da imagem.
+
+Para estimar uma calibracao magnetica inicial depois de uma rotacao 3D ampla:
+
+```powershell
+python python/calibrate_magnetometer.py data/rotacao_3d.bin
+```

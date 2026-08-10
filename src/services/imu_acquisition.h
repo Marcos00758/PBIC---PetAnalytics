@@ -8,15 +8,13 @@
 
 namespace pet::services {
 
-constexpr size_t kBmpCount = 2;
-
 struct AcquisitionCounters {
   uint32_t packetsProduced = 0;
   uint32_t missedScheduleReadings = 0;
   uint32_t failedAcquisitionRounds = 0;
   uint32_t i2cFailures[data::kIcmCount] = {0, 0, 0};
-  uint32_t bmpI2cFailures[kBmpCount] = {0, 0};
-  uint32_t bmpUpdates[kBmpCount] = {0, 0};
+  uint32_t bmpI2cFailures[data::kBmpCount] = {0, 0};
+  uint32_t bmpUpdates[data::kBmpCount] = {0, 0};
   uint32_t magI2cFailures[data::kIcmCount] = {0, 0, 0};
   uint32_t magUpdates[data::kIcmCount] = {0, 0, 0};
   uint32_t magNoNewData[data::kIcmCount] = {0, 0, 0};
@@ -41,12 +39,13 @@ class ImuAcquisition {
 
  private:
   drivers::Icm20948* icms_[data::kIcmCount];
-  drivers::Bmp390* bmps_[kBmpCount];
+  drivers::Bmp390* bmps_[data::kBmpCount];
   const uint32_t samplePeriodUs_;
   const uint32_t bmpSamplesPerImuSample_;
   const uint32_t magSamplesPerImuSample_;
-  uint32_t bmpPressureRaw_[kBmpCount] = {0, 0};
-  uint32_t bmpTemperatureRaw_[kBmpCount] = {0, 0};
+  data::BmpRawValues bmpRaw_[data::kBmpCount] = {
+      {data::kInvalidBmpRaw, data::kInvalidBmpRaw},
+      {data::kInvalidBmpRaw, data::kInvalidBmpRaw}};
   drivers::Vector3i16 magRaw_[data::kIcmCount]{};
   uint32_t magUpdatedAtUs_[data::kIcmCount] = {0, 0, 0};
   bool magCacheValid_[data::kIcmCount] = {false, false, false};

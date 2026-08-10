@@ -28,6 +28,9 @@ constexpr uint8_t kIcmWhoAmIRegister = 0x00;
 constexpr uint8_t kIcmRegisterBankSelect = 0x7F;
 constexpr uint8_t kIcmExpectedWhoAmI = 0xEA;
 constexpr uint32_t kMagSampleRateHz = 20;
+constexpr uint32_t kMagPollRateHz = 25;
+constexpr uint8_t kIcmAccelRangeG = 8;
+constexpr uint16_t kIcmGyroRangeDps = 2000;
 
 // Internal sensor ODRs: accel ~=102.3 Hz and gyro =100 Hz.
 constexpr uint16_t kIcmAccelRateDivisor = 10;
@@ -38,18 +41,18 @@ constexpr uint32_t kImuSamplePeriodUs = 1000000UL / kImuSampleRateHz;
 constexpr uint32_t kBmpSamplesPerImuSample =
     kImuSampleRateHz / kBmpSampleRateHz;
 constexpr uint32_t kMagSamplesPerImuSample =
-    kImuSampleRateHz / kMagSampleRateHz;
+    kImuSampleRateHz / kMagPollRateHz;
 static_assert(kImuSampleRateHz % kBmpSampleRateHz == 0,
               "BMP rate must divide IMU rate");
-static_assert(kImuSampleRateHz % kMagSampleRateHz == 0,
-              "magnetometer rate must divide IMU rate");
+static_assert(kImuSampleRateHz % kMagPollRateHz == 0,
+              "magnetometer poll rate must divide IMU rate");
 static_assert(kMagSamplesPerImuSample >= kIcmSensorCount,
               "magnetometer schedule needs one phase per ICM");
 static_assert(1000000UL % kImuSampleRateHz == 0,
               "IMU sample period must be an integer number of microseconds");
 
 constexpr uint16_t kImuPacketMagic = 0xAA55;
-constexpr uint8_t kImuPacketVersion = 2;
+constexpr uint8_t kImuPacketVersion = 4;
 constexpr uint8_t kCrc8Polynomial = 0x07;
 
 }  // namespace pet::config

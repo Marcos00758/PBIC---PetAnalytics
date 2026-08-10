@@ -1,6 +1,7 @@
 import struct
 import sys
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,20 +11,29 @@ from parse_data import (
     PACKET_SIZE,
     PACKET_STRUCT,
     MagnetometerCalibration,
+    ParseStats,
     crc8,
+    iter_binary_packets,
     parse_stream,
 )
 
 
-def make_packet(timestamp_us=10_000, sequence=7, values=range(27)):
-    without_crc = struct.pack("<HIH27h", MAGIC, timestamp_us, sequence, *values)
+def make_packet(
+    timestamp_us=10_000,
+    sequence=7,
+    values=range(27),
+    bmp_raw=(1_000_000, 2_000_000, 3_000_000, 4_000_000),
+):
+    without_crc = struct.pack(
+        "<HIH27h4I", MAGIC, timestamp_us, sequence, *values, *bmp_raw
+    )
     return without_crc + bytes((crc8(without_crc),))
 
 
 class ParseDataTest(unittest.TestCase):
-    def test_packet_contract_is_63_bytes(self):
-        self.assertEqual(PACKET_SIZE, 63)
-        self.assertEqual(PACKET_STRUCT.size, 63)
+    def test_packet_contract_is_79_bytes(self):
+        self.assertEqual(PACKET_SIZE, 79)
+        self.assertEqual(PACKET_STRUCT.size, 79)
 
     def test_parses_valid_packet(self):
         packets, stats = parse_stream(make_packet())
@@ -31,6 +41,10 @@ class ParseDataTest(unittest.TestCase):
         self.assertEqual(stats.crc_failures, 0)
         self.assertEqual(packets[0].packet.sequence, 7)
         self.assertEqual(packets[0].packet.values, tuple(range(27)))
+        self.assertEqual(
+            packets[0].packet.bmp_raw,
+            ((1_000_000, 2_000_000), (3_000_000, 4_000_000)),
+        )
 
     def test_applies_magnetometer_scale_and_calibration(self):
         packet = parse_stream(make_packet(values=[0] * 6 + [100, 200, -100] + [0] * 18))[0][0].packet
@@ -59,6 +73,16 @@ class ParseDataTest(unittest.TestCase):
         raw = make_packet(sequence=0xFFFF) + make_packet(sequence=1)
         _, stats = parse_stream(raw)
         self.assertEqual(stats.sequence_gaps, 1)
+
+    def test_streams_packets_across_chunk_boundaries(self):
+        raw = b"log" + make_packet(sequence=1) + make_packet(sequence=3) + b"tail"
+        stats = ParseStats()
+        packets = list(iter_binary_packets(BytesIO(raw), stats, chunk_size=79))
+        self.assertEqual([item.packet.sequence for item in packets], [1, 3])
+        self.assertEqual(stats.valid_packets, 2)
+        self.assertEqual(stats.sequence_gaps, 1)
+        self.assertEqual(stats.discarded_bytes, 3)
+        self.assertEqual(stats.trailing_bytes, 4)
 
 
 if __name__ == "__main__":

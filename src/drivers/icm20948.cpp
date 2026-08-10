@@ -28,8 +28,10 @@ constexpr uint8_t kAk09916DataReadyMask = 0x01;
 constexpr uint8_t kAk09916DataOverrunMask = 0x02;
 constexpr uint8_t kAk09916OverflowMask = 0x08;
 constexpr uint8_t kAuxiliaryTransactionPollLimit = 100;
-constexpr float kAccelScaleMps2PerCount = (2.0f * 9.80665f) / 32767.5f;
-constexpr float kGyroScaleDpsPerCount = 250.0f / 32768.0f;
+constexpr float kAccelScaleMps2PerCount =
+    (config::kIcmAccelRangeG * 9.80665f) / 32767.5f;
+constexpr float kGyroScaleDpsPerCount =
+    static_cast<float>(config::kIcmGyroRangeDps) / 32768.0f;
 
 int16_t decodeBigEndianInt16(const uint8_t* bytes) {
   return static_cast<int16_t>((static_cast<uint16_t>(bytes[0]) << 8) |
@@ -250,8 +252,8 @@ bool Icm20948::readAuxiliaryRegister(uint8_t slaveAddress,
 }
 
 bool Icm20948::configure() {
-  sensor_.setAccelRange(ICM20948_ACCEL_RANGE_2_G);
-  sensor_.setGyroRange(ICM20948_GYRO_RANGE_250_DPS);
+  sensor_.setAccelRange(ICM20948_ACCEL_RANGE_8_G);
+  sensor_.setGyroRange(ICM20948_GYRO_RANGE_2000_DPS);
   sensor_.setAccelRateDivisor(config::kIcmAccelRateDivisor);
   sensor_.setGyroRateDivisor(config::kIcmGyroRateDivisor);
 
@@ -263,8 +265,8 @@ bool Icm20948::configure() {
       sensor_.setMagDataRate(AK09916_MAG_DATARATE_20_HZ);
 
   return accelFilterDisabled && gyroFilterDisabled && magnetometerConfigured &&
-         sensor_.getAccelRange() == ICM20948_ACCEL_RANGE_2_G &&
-         sensor_.getGyroRange() == ICM20948_GYRO_RANGE_250_DPS &&
+         sensor_.getAccelRange() == ICM20948_ACCEL_RANGE_8_G &&
+         sensor_.getGyroRange() == ICM20948_GYRO_RANGE_2000_DPS &&
          sensor_.getAccelRateDivisor() == config::kIcmAccelRateDivisor &&
          sensor_.getGyroRateDivisor() == config::kIcmGyroRateDivisor;
 }

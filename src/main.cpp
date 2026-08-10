@@ -49,7 +49,11 @@ bool initializeSensor(pet::drivers::Icm20948& icm) {
   printHexByte(icm.whoAmI());
   Serial.print(" AK09916_WIA2=0x");
   printHexByte(icm.magnetometerWhoAmI());
-  Serial.println(" accel=+/-2g gyro=+/-250dps mag=20Hz");
+  Serial.print(" accel=+/-");
+  Serial.print(pet::config::kIcmAccelRangeG);
+  Serial.print("g gyro=+/-");
+  Serial.print(pet::config::kIcmGyroRangeDps);
+  Serial.println("dps mag=20Hz");
   return true;
 }
 
@@ -154,8 +158,8 @@ void setup() {
   }
   mux.disableAllChannels();
 
-  if (!sensorsReady) {
-    Serial.println("Acquisition disabled because at least one ICM failed.");
+  if (!sensorsReady || !bmpsReady) {
+    Serial.println("Acquisition disabled because at least one sensor failed.");
     return;
   }
 
@@ -168,7 +172,9 @@ void setup() {
   Serial.print(" bmp_rate_hz=");
   Serial.print(pet::config::kBmpSampleRateHz);
   Serial.print(" mag_rate_hz=");
-  Serial.println(pet::config::kMagSampleRateHz);
+  Serial.print(pet::config::kMagSampleRateHz);
+  Serial.print(" mag_poll_rate_hz=");
+  Serial.println(pet::config::kMagPollRateHz);
 
   acquisition.start(micros());
   acquisitionReady = true;

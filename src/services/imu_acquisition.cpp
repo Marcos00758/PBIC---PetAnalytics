@@ -83,15 +83,23 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
   }
 
   if (bmpSamplesPerImuSample_ > 0 &&
-      packetSequence % bmpSamplesPerImuSample_ == 0) {
-    for (size_t i = 0; i < kBmpCount; ++i) {
+      bmpSamplesPerImuSample_ >= data::kBmpCount) {
+    for (size_t i = 0; i < data::kBmpCount; ++i) {
+      const uint32_t phase =
+          (i == 0) ? bmpSamplesPerImuSample_ - 1U : 0U;
+      const bool cacheNeedsPriming =
+          bmpRaw_[i].pressure == data::kInvalidBmpRaw;
+      if (!cacheNeedsPriming &&
+          packetSequence % bmpSamplesPerImuSample_ != phase) {
+        continue;
+      }
+
       drivers::Bmp390RawSample sample{};
       if (!bmps_[i]->readRaw(sample)) {
         ++counters_.bmpI2cFailures[i];
         continue;
       }
-      bmpPressureRaw_[i] = sample.pressure;
-      bmpTemperatureRaw_[i] = sample.temperature;
+      bmpRaw_[i] = {sample.pressure, sample.temperature};
       ++counters_.bmpUpdates[i];
     }
   }
@@ -137,7 +145,7 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
                              &values[i * data::kValuesPerIcm]);
   }
 
-  utils::buildImuPacket(packet, nowUs, packetSequence, values);
+  utils::buildImuPacket(packet, nowUs, packetSequence, values, bmpRaw_);
   ++counters_.packetsProduced;
   return true;
 }

@@ -2,16 +2,25 @@ import struct
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from analyze_imu import calculate_timing, format_validation, plot_capture
+from analyze_imu import (
+    analyze_file,
+    calculate_timing,
+    format_validation,
+    load_gyro_range_dps,
+    plot_capture,
+)
 from parse_data import MAGIC, crc8, parse_stream
 
 
 def make_packet(timestamp_us: int, sequence: int) -> bytes:
-    without_crc = struct.pack("<HIH27h", MAGIC, timestamp_us, sequence, *([0] * 27))
+    without_crc = struct.pack(
+        "<HIH27h4I", MAGIC, timestamp_us, sequence, *([0] * 27), *([0] * 4)
+    )
     return without_crc + bytes((crc8(without_crc),))
 
 
@@ -42,6 +51,29 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertIn("crc_failures=1", report)
         self.assertIn("sequence_gaps=1", report)
 
+    def test_analyzes_file_incrementally(self):
+        raw = b"".join(
+            make_packet(timestamp, sequence)
+            for timestamp, sequence in ((1_000, 1), (11_000, 2), (21_000, 3))
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.bin"
+            path.write_bytes(raw)
+            packets, stats, timing, diagnostics = analyze_file(path)
+        self.assertEqual(stats.valid_packets, 3)
+        self.assertEqual(len(packets), 3)
+        self.assertIsNotNone(timing)
+        self.assertEqual(diagnostics.accel_near_limit, (0, 0, 0))
+
+    def test_preserves_v3_gyro_scale_from_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.bin"
+            metadata = path.with_suffix(".bin.json")
+            metadata.write_text(json.dumps({"packet_version": 3}), encoding="utf-8")
+            version, gyro_range = load_gyro_range_dps(path)
+        self.assertEqual(version, 3)
+        self.assertEqual(gyro_range, 1000.0)
+
     def test_generates_imu_and_magnetometer_pngs(self):
         import matplotlib
 
@@ -57,11 +89,19 @@ class AnalyzeImuTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "capture.png"
             mag_output = Path(directory) / "capture_mag.png"
+            bmp_output = Path(directory) / "capture_bmp.png"
             plot_capture(
-                packets, stats, timing, output, show=False, mag_output=mag_output
+                packets,
+                stats,
+                timing,
+                output,
+                show=False,
+                mag_output=mag_output,
+                bmp_output=bmp_output,
             )
             self.assertGreater(output.stat().st_size, 0)
             self.assertGreater(mag_output.stat().st_size, 0)
+            self.assertGreater(bmp_output.stat().st_size, 0)
 
 
 if __name__ == "__main__":

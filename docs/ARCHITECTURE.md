@@ -134,17 +134,17 @@ próprio baseado em `Wire` para o PCA9548A. Os canais ICM são `0`, `1` e `4`.
 
 Configuração inicial de bancada:
 
-- acelerômetro: faixa de `+/-2 g`, divisor 10, ODR aproximado de 102,3 Hz;
-- giroscópio: faixa de `+/-250 graus/s`, divisor 10, ODR de 100 Hz;
+- acelerômetro: faixa de `+/-8 g`, divisor 10, ODR aproximado de 102,3 Hz;
+- giroscópio: faixa de `+/-2000 graus/s`, divisor 10, ODR de 100 Hz;
 - filtros digitais passa-baixas desativados;
 - magnetômetro AK09916 configurado e adquirido a 20 Hz com cache;
 - rodada de leitura dos três ICMs a 100 Hz, agendada com `micros()`;
-- saída USB binária não bloqueante em pacotes de 63 bytes.
+- saída USB binária não bloqueante em pacotes v4 de 79 bytes.
 
 A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
-mantém em modo contínuo a 20 Hz. As faixas de `+/-2 g` e `+/-250 graus/s`
-priorizam resolução no teste de bancada e devem ser revistas após testes de
-saturação com movimento real.
+mantém em modo contínuo a 20 Hz. As faixas foram ampliadas para `+/-8 g` e
+`+/-2000 graus/s` depois que movimentos fortes saturaram as configurações de
+bancada anteriores. A nova configuração ainda deve ser validada no uso real.
 
 Depois de selecionar um canal, o driver aguarda 80 microssegundos antes de
 acessar o sensor. Esse tempo veio da experiência com o hardware legado e ainda
@@ -169,8 +169,8 @@ mantém um proxy de nove bytes de `ST1` a `ST2`. O driver confirma novamente o
 `WIA2` por uma transação de um byte via `I2C_SLV4`, configura o magnetômetro a
 20 Hz e lê no boot os três eixos crus little-endian, `ST1` e `ST2`.
 
-O serviço de aquisição consulta o proxy de cada magnetômetro uma vez a cada
-cinco rodadas IMU, em fases diferentes, mantendo os últimos eixos crus válidos
+O serviço de aquisição consulta o proxy de cada magnetômetro a 25 Hz, em fases
+diferentes, mantendo os últimos eixos crus válidos
 
 
 
@@ -187,7 +187,7 @@ trio cru mudou em relação ao cache. Leituras com overflow são rejeitadas.
 
 Existem contadores separados por magnetômetro para falha I2C, atualização
 aceita, ausência de novidade, overrun (`DOR`) e overflow (`HOFL`). Os nove
-valores crus entram no pacote v2, que possui 63 bytes. As consultas dos três
+valores crus entram no pacote v4. As consultas dos três
 AK09916 são distribuídas em fases diferentes das rodadas de 100 Hz, enquanto o
 último valor válido de cada sensor é repetido a partir do cache.
 
@@ -200,7 +200,8 @@ esperado `0x60` por meio da biblioteca `Adafruit BMP3XX 2.1.6`.
 Os canais 2 e 3, ambos no endereço `0x77`, foram confirmados na montagem física.
 Após o diagnóstico, o driver coloca os BMP390 em modo normal contínuo a 25 Hz.
 O serviço de aquisição lê diretamente os seis bytes crus de pressão e
-temperatura, em little-endian, a cada quatro rodadas das IMUs e mantém o último
+temperatura, em little-endian, a cada quatro rodadas das IMUs, com uma fase por
+BMP, e mantém o último
 valor válido de cada sensor em cache. Falhas BMP possuem contadores próprios e
 não descartam a rodada das IMUs.
 
@@ -210,10 +211,17 @@ pela inicialização e validação, enquanto a aquisição contínua usa os
 registradores oficiais `PWR_CTRL` (`0x1B`), `OSR` (`0x1C`), `ODR` (`0x1D`) e o
 bloco de dados `0x04` a `0x09`. Não há `float` nesse caminho de aquisição.
 
-O cache dos BMP390 ainda não participa do pacote binário v2 de 63 bytes. Sua
+Os quatro valores crus em cache participam do pacote v4 como `uint32`, na ordem
+pressão/temperatura do canal 2 e pressão/temperatura do canal 3. O pacote possui
+79 bytes e o parser gera um gráfico separado com contagens cruas. A compensação
+em Pa e graus Celsius depende dos coeficientes NVM individuais.
+A etapa do cartão SD registrará esses coeficientes em `meta.txt`.
 
+## Ferramentas Python para sessões longas
 
-
-
-
-inclusão exigirá outra mudança formal em `docs/DATA_FORMAT.md` e no parser.
+O parser de arquivo trabalha em blocos de 64 KiB, preservando busca de magic,
+CRC e ressincronização entre blocos. O analisador calcula timing e diagnósticos
+sobre toda a sessão, mas limita os pontos mantidos para gráficos. A ferramenta
+`python/calibrate_magnetometer.py` produz uma estimativa inicial de hard-iron e
+soft-iron diagonal somente quando a captura cobre rotação suficiente nos três
+eixos.

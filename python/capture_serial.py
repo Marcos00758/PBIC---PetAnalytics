@@ -57,14 +57,20 @@ def read_available(port: serial.Serial) -> bytes:
 def synchronize(port: serial.Serial) -> bytearray:
     deadline = time.monotonic() + SYNC_TIMEOUT_SECONDS
     pending = bytearray()
+    received_bytes = 0
     while time.monotonic() < deadline:
-        pending.extend(read_available(port))
+        received = read_available(port)
+        received_bytes += len(received)
+        pending.extend(received)
         packets, _ = parse_stream(pending)
         if packets:
             return bytearray(pending[packets[0].offset :])
         if len(pending) > PACKET_SIZE * 4:
             del pending[: -PACKET_SIZE]
-    raise TimeoutError("no valid IMU packet received before synchronization timeout")
+    raise TimeoutError(
+        "no valid sensor packet received before synchronization timeout; "
+        f"received_bytes={received_bytes} expected_packet_size={PACKET_SIZE}"
+    )
 
 
 def capture_sensor_window(
@@ -140,6 +146,10 @@ def main() -> None:
         print(f"port={port_name}")
         print(f"waiting_for_valid_packet duration_s={args.duration:g}")
         with serial.Serial(port_name, SERIAL_BAUD, timeout=READ_TIMEOUT_SECONDS) as port:
+            port.dtr = True
+            port.rts = True
+            time.sleep(0.2)
+            port.reset_input_buffer()
             raw, _ = capture_sensor_window(port, args.duration)
         metadata_path = write_capture(output, raw, port_name, args.duration)
     except (OSError, RuntimeError, TimeoutError, serial.SerialException) as exc:
