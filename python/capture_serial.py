@@ -18,7 +18,14 @@ except ImportError as exc:
         "pyserial is required; install it with: pip install -r python/requirements.txt"
     ) from exc
 
-from parse_data import PACKET_SIZE, PACKET_VERSION, elapsed_us, parse_stream, summarize
+from parse_data import (
+    PACKET_SIZE,
+    PACKET_VERSION,
+    decode_packet,
+    elapsed_us,
+    parse_stream,
+    summarize,
+)
 
 DEFAULT_DURATION_SECONDS = 10.0
 SERIAL_BAUD = 115200
@@ -77,16 +84,24 @@ def capture_sensor_window(
     port: serial.Serial, duration_seconds: float
 ) -> tuple[bytes, int]:
     raw = synchronize(port)
-    first_packets, _ = parse_stream(raw)
-    first_timestamp = first_packets[0].packet.timestamp_us
+    first_timestamp: int | None = None
+    scan_offset = 0
     duration_us = round(duration_seconds * 1_000_000)
     host_deadline = time.monotonic() + duration_seconds + CAPTURE_TIMEOUT_MARGIN_SECONDS
 
     while time.monotonic() < host_deadline:
-        packets, _ = parse_stream(raw)
-        for parsed in packets[1:]:
-            if elapsed_us(first_timestamp, parsed.packet.timestamp_us) >= duration_us:
-                return bytes(raw[: parsed.offset]), first_timestamp
+        while len(raw) - scan_offset >= PACKET_SIZE:
+            try:
+                packet = decode_packet(raw[scan_offset : scan_offset + PACKET_SIZE])
+            except ValueError:
+                scan_offset += 1
+                continue
+
+            if first_timestamp is None:
+                first_timestamp = packet.timestamp_us
+            elif elapsed_us(first_timestamp, packet.timestamp_us) >= duration_us:
+                return bytes(raw[:scan_offset]), first_timestamp
+            scan_offset += PACKET_SIZE
         raw.extend(read_available(port))
 
     raise TimeoutError("capture did not reach the requested sensor-time duration")
