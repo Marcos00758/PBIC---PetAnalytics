@@ -1,5 +1,6 @@
 import struct
 import sys
+import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +15,8 @@ from parse_data import (
     ParseStats,
     crc8,
     iter_binary_packets,
+    load_bmp390_calibrations,
+    load_session_metadata,
     parse_stream,
 )
 
@@ -83,6 +86,44 @@ class ParseDataTest(unittest.TestCase):
         self.assertEqual(stats.sequence_gaps, 1)
         self.assertEqual(stats.discarded_bytes, 3)
         self.assertEqual(stats.trailing_bytes, 4)
+
+    def test_loads_bmp390_nvm_from_sd_session_metadata(self):
+        nvm = struct.pack(
+            "<HHbhhbbHHbbhbb",
+            100,
+            200,
+            1,
+            16000,
+            16010,
+            1,
+            1,
+            20000,
+            1000,
+            1,
+            1,
+            10,
+            1,
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            input_path = session / "imu.bin"
+            input_path.write_bytes(b"")
+            (session / "meta.txt").write_text(
+                "packet_version=4\n"
+                f"bmp0_nvm_valid=1\nbmp0_nvm={nvm.hex()}\n"
+                "bmp1_nvm_valid=0\nbmp1_nvm=\n",
+                encoding="ascii",
+            )
+            metadata = load_session_metadata(input_path)
+            calibrations = load_bmp390_calibrations(input_path)
+
+        self.assertEqual(metadata["packet_version"], "4")
+        self.assertIsNotNone(calibrations[0])
+        self.assertIsNone(calibrations[1])
+        pressure, temperature = calibrations[0].compensate(6_000_000, 8_000_000)
+        self.assertTrue(pressure == pressure)
+        self.assertTrue(temperature == temperature)
 
 
 if __name__ == "__main__":

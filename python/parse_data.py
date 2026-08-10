@@ -19,6 +19,7 @@ BMP_RAW_INVALID = 0xFFFFFFFF
 ACCEL_MPS2_PER_COUNT = (8.0 * 9.80665) / 32767.5
 DEFAULT_GYRO_RANGE_DPS = 2000.0
 MAG_UT_PER_COUNT = 0.15
+BMP390_NVM_LENGTH = 21
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,87 @@ class MagnetometerCalibration:
             sum(coefficient * value for coefficient, value in zip(row, centered))
             for row in self.soft_iron_matrix
         )
+
+
+@dataclass(frozen=True)
+class Bmp390Calibration:
+    t1: float
+    t2: float
+    t3: float
+    p1: float
+    p2: float
+    p3: float
+    p4: float
+    p5: float
+    p6: float
+    p7: float
+    p8: float
+    p9: float
+    p10: float
+    p11: float
+
+    @classmethod
+    def from_nvm(cls, nvm: bytes) -> "Bmp390Calibration":
+        if len(nvm) != BMP390_NVM_LENGTH:
+            raise ValueError(f"BMP390 NVM must contain {BMP390_NVM_LENGTH} bytes")
+        t1, t2, t3, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11 = (
+            struct.unpack_from("<H", nvm, 0)[0],
+            struct.unpack_from("<H", nvm, 2)[0],
+            struct.unpack_from("<b", nvm, 4)[0],
+            struct.unpack_from("<h", nvm, 5)[0],
+            struct.unpack_from("<h", nvm, 7)[0],
+            struct.unpack_from("<b", nvm, 9)[0],
+            struct.unpack_from("<b", nvm, 10)[0],
+            struct.unpack_from("<H", nvm, 11)[0],
+            struct.unpack_from("<H", nvm, 13)[0],
+            struct.unpack_from("<b", nvm, 15)[0],
+            struct.unpack_from("<b", nvm, 16)[0],
+            struct.unpack_from("<h", nvm, 17)[0],
+            struct.unpack_from("<b", nvm, 19)[0],
+            struct.unpack_from("<b", nvm, 20)[0],
+        )
+        return cls(
+            t1=t1 / 2**-8,
+            t2=t2 / 2**30,
+            t3=t3 / 2**48,
+            p1=(p1 - 16384) / 2**20,
+            p2=(p2 - 16384) / 2**29,
+            p3=p3 / 2**32,
+            p4=p4 / 2**37,
+            p5=p5 / 2**-3,
+            p6=p6 / 2**6,
+            p7=p7 / 2**8,
+            p8=p8 / 2**15,
+            p9=p9 / 2**48,
+            p10=p10 / 2**48,
+            p11=p11 / 2**65,
+        )
+
+    def compensate(self, pressure_raw: int, temperature_raw: int) -> tuple[float, float]:
+        if pressure_raw == BMP_RAW_INVALID or temperature_raw == BMP_RAW_INVALID:
+            return float("nan"), float("nan")
+        temperature_delta = temperature_raw - self.t1
+        temperature_c = (
+            temperature_delta * self.t2
+            + temperature_delta * temperature_delta * self.t3
+        )
+        pressure_offset = (
+            self.p5
+            + self.p6 * temperature_c
+            + self.p7 * temperature_c**2
+            + self.p8 * temperature_c**3
+        )
+        pressure_sensitivity = pressure_raw * (
+            self.p1
+            + self.p2 * temperature_c
+            + self.p3 * temperature_c**2
+            + self.p4 * temperature_c**3
+        )
+        pressure_nonlinearity = (
+            pressure_raw**2 * (self.p9 + self.p10 * temperature_c)
+            + pressure_raw**3 * self.p11
+        )
+        return pressure_offset + pressure_sensitivity + pressure_nonlinearity, temperature_c
 
 
 @dataclass(frozen=True)
@@ -242,6 +324,39 @@ def count_sequence_gaps(packets: Iterable[ImuPacket]) -> int:
 
 def elapsed_us(start_timestamp: int, end_timestamp: int) -> int:
     return (end_timestamp - start_timestamp) & 0xFFFFFFFF
+
+
+def load_session_metadata(input_path: Path) -> dict[str, str]:
+    """Load key/value metadata written next to an SD session imu.bin."""
+    metadata_path = input_path.parent / "meta.txt"
+    if not metadata_path.exists():
+        return {}
+    metadata: dict[str, str] = {}
+    for line in metadata_path.read_text(encoding="ascii", errors="replace").splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        metadata[key.strip()] = value.strip()
+    return metadata
+
+
+def load_bmp390_calibrations(
+    input_path: Path,
+) -> tuple[Bmp390Calibration | None, Bmp390Calibration | None]:
+    metadata = load_session_metadata(input_path)
+    calibrations: list[Bmp390Calibration | None] = []
+    for sensor in range(2):
+        encoded = metadata.get(f"bmp{sensor}_nvm", "")
+        valid = metadata.get(f"bmp{sensor}_nvm_valid", "1") == "1"
+        if not encoded or not valid:
+            calibrations.append(None)
+            continue
+        try:
+            nvm = bytes.fromhex(encoded)
+            calibrations.append(Bmp390Calibration.from_nvm(nvm))
+        except ValueError:
+            calibrations.append(None)
+    return calibrations[0], calibrations[1]
 
 
 def summarize(packets: list[ParsedPacket], stats: ParseStats) -> str:

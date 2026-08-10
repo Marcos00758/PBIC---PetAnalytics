@@ -74,6 +74,17 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertEqual(version, 3)
         self.assertEqual(gyro_range, 1000.0)
 
+    def test_loads_v4_gyro_scale_from_sd_meta(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "imu.bin"
+            path.write_bytes(b"")
+            (path.parent / "meta.txt").write_text(
+                "packet_version=4\ngyro_range_dps=2000\n", encoding="ascii"
+            )
+            version, gyro_range = load_gyro_range_dps(path)
+        self.assertEqual(version, 4)
+        self.assertEqual(gyro_range, 2000.0)
+
     def test_generates_imu_and_magnetometer_pngs(self):
         import matplotlib
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from parse_data import (
     BMP_RAW_INVALID,
+    Bmp390Calibration,
     DEFAULT_GYRO_RANGE_DPS,
     PACKET_SIZE,
     MagnetometerCalibration,
@@ -18,6 +19,8 @@ from parse_data import (
     ParsedPacket,
     elapsed_us,
     iter_file_packets,
+    load_bmp390_calibrations,
+    load_session_metadata,
 )
 
 MAX_PLOT_POINTS = 50_000
@@ -279,10 +282,14 @@ def load_magnetometer_calibrations(
 
 def load_gyro_range_dps(path: Path) -> tuple[int | None, float]:
     metadata_path = path.with_suffix(path.suffix + ".json")
-    if not metadata_path.exists():
-        return None, DEFAULT_GYRO_RANGE_DPS
-    document = json.loads(metadata_path.read_text(encoding="utf-8"))
-    version = int(document["packet_version"])
+    if metadata_path.exists():
+        document = json.loads(metadata_path.read_text(encoding="utf-8"))
+        version = int(document["packet_version"])
+    else:
+        session_metadata = load_session_metadata(path)
+        if "packet_version" not in session_metadata:
+            return None, DEFAULT_GYRO_RANGE_DPS
+        version = int(session_metadata["packet_version"])
     if version not in GYRO_RANGE_BY_PACKET_VERSION:
         raise ValueError(f"unsupported packet version in metadata: {version}")
     return version, GYRO_RANGE_BY_PACKET_VERSION[version]
@@ -298,6 +305,7 @@ def plot_capture(
     mag_calibrations: tuple[MagnetometerCalibration, ...] | None = None,
     bmp_output: Path | None = None,
     gyro_range_dps: float = DEFAULT_GYRO_RANGE_DPS,
+    bmp_calibrations: tuple[Bmp390Calibration | None, ...] | None = None,
 ) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -367,34 +375,40 @@ def plot_capture(
         mag_output.parent.mkdir(parents=True, exist_ok=True)
         mag_figure.savefig(mag_output, dpi=160, bbox_inches="tight")
 
+    calibrations = bmp_calibrations or (None, None)
+    compensated = all(calibration is not None for calibration in calibrations)
     bmp_figure, bmp_axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
     for sensor in range(2):
-        bmp_axes[0].plot(
-            times_s,
-            [
+        calibration = calibrations[sensor]
+        compensated_values = [
+            calibration.compensate(*item.packet.bmp_raw[sensor])
+            if calibration is not None
+            else (
                 math.nan
                 if item.packet.bmp_raw[sensor][0] == BMP_RAW_INVALID
-                else item.packet.bmp_raw[sensor][0]
-                for item in packets
-            ],
+                else float(item.packet.bmp_raw[sensor][0]),
+                math.nan
+                if item.packet.bmp_raw[sensor][1] == BMP_RAW_INVALID
+                else float(item.packet.bmp_raw[sensor][1]),
+            )
+            for item in packets
+        ]
+        bmp_axes[0].plot(
+            times_s,
+            [value[0] for value in compensated_values],
             label=f"BMP#{sensor}",
             linewidth=1,
         )
         bmp_axes[1].plot(
             times_s,
-            [
-                math.nan
-                if item.packet.bmp_raw[sensor][1] == BMP_RAW_INVALID
-                else item.packet.bmp_raw[sensor][1]
-                for item in packets
-            ],
+            [value[1] for value in compensated_values],
             label=f"BMP#{sensor}",
             linewidth=1,
         )
-    bmp_axes[0].set_title("BMP390 - Pressao crua em cache")
-    bmp_axes[1].set_title("BMP390 - Temperatura crua em cache")
-    bmp_axes[0].set_ylabel("Contagem raw 24-bit")
-    bmp_axes[1].set_ylabel("Contagem raw 24-bit")
+    bmp_axes[0].set_title("BMP390 - Pressao compensada" if compensated else "BMP390 - Pressao crua em cache")
+    bmp_axes[1].set_title("BMP390 - Temperatura compensada" if compensated else "BMP390 - Temperatura crua em cache")
+    bmp_axes[0].set_ylabel("Pressao (Pa)" if compensated else "Contagem raw 24-bit")
+    bmp_axes[1].set_ylabel("Temperatura (graus C)" if compensated else "Contagem raw 24-bit")
     bmp_axes[1].set_xlabel("Tempo (s)")
     for axis in bmp_axes:
         axis.grid(True, alpha=0.45)
@@ -437,8 +451,10 @@ def main() -> None:
     mag_output = args.mag_output or args.input.with_name(
         f"{args.input.stem}_mag.png"
     )
+    bmp_calibrations = load_bmp390_calibrations(args.input)
+    has_bmp_calibration = all(item is not None for item in bmp_calibrations)
     bmp_output = args.bmp_output or args.input.with_name(
-        f"{args.input.stem}_bmp_raw.png"
+        f"{args.input.stem}_{'bmp' if has_bmp_calibration else 'bmp_raw'}.png"
     )
     try:
         calibrations = load_magnetometer_calibrations(args.mag_calibration)
@@ -446,6 +462,10 @@ def main() -> None:
         print(
             f"packet_version={packet_version if packet_version is not None else 'unknown'} "
             f"gyro_range_dps={gyro_range_dps:g}"
+        )
+        print(
+            "bmp_compensation="
+            + ("available_from_meta" if has_bmp_calibration else "unavailable_raw_only")
         )
         plot_capture(
             packets,
@@ -457,6 +477,7 @@ def main() -> None:
             calibrations,
             bmp_output,
             gyro_range_dps,
+            bmp_calibrations,
         )
     except (OSError, ValueError, json.JSONDecodeError, RuntimeError) as exc:
         raise SystemExit(str(exc)) from exc

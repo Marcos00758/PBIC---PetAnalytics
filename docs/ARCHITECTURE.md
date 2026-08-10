@@ -57,7 +57,11 @@ PBIC/
 │   │   ├── bmp390.cpp
 │   │   ├── bmp390.h
 │   │   ├── microphone.cpp
-│   │   ├── microphone.h
+│   │   └── microphone.h
+│   │
+│   ├── services/
+│   │   ├── imu_acquisition.cpp
+│   │   ├── imu_acquisition.h
 │   │   ├── sd_logger.cpp
 │   │   └── sd_logger.h
 │   │
@@ -126,6 +130,34 @@ bmp1_channel=3
 icm2_channel=4
 
 status.txt: Registra se os componentes inicializaram corretamente e se a gravação funcionou 
+
+## Gravação no cartão SD
+
+O serviço `src/services/sd_logger` usa a biblioteca `SD` fornecida pelo core da
+Teensy, que por sua vez utiliza SdFat. Nenhuma dependência externa foi
+adicionada ao `platformio.ini`. O cartão é inicializado antes do barramento I2C
+com `CS=10` e passa por um teste curto de escrita e leitura.
+
+O firmware não espera uma conexão USB durante o boot. O stream binário USB é
+controlado por `kUsbBinaryStreamEnabled` e fica desabilitado por padrão na fase
+de gravação autônoma, mantendo o monitor serial legível. Ele pode ser reativado
+em builds de bancada. Se o SD estiver ausente ou falhar, o diagnóstico textual
+continua disponível, mas não há persistência dos pacotes enquanto o stream
+binário permanecer desabilitado. Com SD válido, o contador persistente
+`/session.txt` escolhe uma pasta nova `/Sxxx`, e `imu.bin` permanece aberto
+durante a sessão.
+
+Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
+escreve blocos de até 512 bytes depois da aquisição, faz flush a cada 1000
+pacotes e atualiza `status.txt` a cada 6000 pacotes. O status é substituído por
+arquivo temporário para evitar texto parcialmente reescrito. Uma janela de dois
+segundos exige pelo menos uma escrita bem-sucedida quando houve tentativas; uma
+janela inteira sem sucesso desativa somente o logger. A remoção física ainda
+precisa ser validada no hardware real.
+
+Durante o setup, cada BMP390 fornece os 21 bytes dos registradores NVM `0x31` a
+`0x45`. Eles são gravados em hexadecimal no `meta.txt`; o Python faz a
+compensação Bosch, sem uso de `float` no caminho de aquisição do firmware.
 
 ## Aquisição inicial dos ICM-20948
 

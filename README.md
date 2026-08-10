@@ -11,7 +11,9 @@ Objetivo
 Este projeto é um wearable para cães destinado à coleta de dados para pesquisa.
 Nesta etapa não existe classificação em tempo real. O objetivo é coletar dados
 sincronizados dos sensores em Arduino/C++ na Teensy 4.0 e interpretá-los em
-Python. A gravação no cartão SD será adicionada em uma etapa posterior.
+Python. O firmware grava de forma autônoma no cartão SD. O stream binário USB
+é opcional para diagnóstico de bancada e fica desabilitado por padrão durante
+a etapa de gravação no SD.
 ## Hardware
 
 -   Teensy 4.0
@@ -27,8 +29,33 @@ Python. A gravação no cartão SD será adicionada em uma etapa posterior.
 Os três ICM-20948 nos canais 0, 1 e 4 do PCA9548A são lidos a 100 Hz. O firmware
 transmite pela USB pacotes binários de 79 bytes com timestamp, sequência, 27
 valores crus `int16` dos ICMs, quatro valores `uint32` crus dos BMP390 e CRC-8.
+O mesmo fluxo é gravado em `/Sxxx/imu.bin`; `meta.txt` preserva a configuração
+e os 21 bytes NVM individuais de cada BMP390, enquanto `status.txt` registra
+contadores da aquisição e do SD.
 O formato completo está em
 `docs/DATA_FORMAT.md`.
+
+## Sessões no cartão SD
+
+Com um cartão FAT ou exFAT conectado nos pinos documentados, cada boot cria uma
+nova pasta `/Sxxx`. O firmware não espera a USB e continua adquirindo sem
+computador. O arquivo `imu.bin` permanece aberto, recebe escritas em blocos a
+partir de um buffer RAM e faz flush periódico.
+
+Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
+
+```powershell
+python python/parse_data.py E:/S001/imu.bin
+python python/analyze_imu.py E:/S001/imu.bin --no-show
+```
+
+Quando `meta.txt` acompanha `imu.bin`, o analisador aplica automaticamente a
+compensação Bosch e gera o gráfico BMP em Pa e graus Celsius.
+
+Para uma captura USB de bancada, altere temporariamente
+`kUsbBinaryStreamEnabled` para `true` em `src/config/constants.h`, recompile e
+use `python/capture_serial.py`. Com o valor padrão `false`, o monitor serial
+permanece textual e a aquisição continua sendo gravada somente no SD.
 
 ## Captura de bancada
 
