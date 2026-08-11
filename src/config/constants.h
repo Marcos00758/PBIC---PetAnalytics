@@ -27,8 +27,7 @@ constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
 constexpr uint32_t kSdHealthWindowMs = 2000;
 constexpr uint32_t kSdWriteRetryMs = 20;
 constexpr uint32_t kSdFailureLedDelayMs = 5000;
-// Temporary bench test: keep SPI and pin 13 untouched after an SD failure.
-constexpr bool kSdFailureIndicatorEnabled = false;
+constexpr bool kSdFailureIndicatorEnabled = true;
 constexpr uint32_t kSdFailureLedCycleMs = 1200;
 constexpr uint32_t kSdFailureLedPulseMs = 150;
 constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
