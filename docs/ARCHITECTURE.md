@@ -161,6 +161,11 @@ pulsos curtos repetidos. O LED compartilha o pino 13 com `SCK` e nunca é
 controlado enquanto o SPI do SD estiver ativo. Não há tentativa de reinserção
 automática do cartão.
 
+Na investigação de bancada atual, `kSdFailureIndicatorEnabled=false` desativa
+temporariamente todo esse estágio posterior: o firmware não chama `SPI.end()`
+nem controla o LED no pino 13. `SD_ERROR_CONFIRMED` continua ativo para mostrar
+a causa original devolvida pelo logger. Reativar o indicador depois do teste.
+
 O logger mede separadamente a maior duração de escrita, flush e atualização de
 status, além de contar operações de cada tipo com duração igual ou superior a
 10 ms. Esses valores permitem localizar a origem dos deadlines perdidos sem

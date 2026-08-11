@@ -570,7 +570,7 @@ bool SdLogger::writeBufferedBytes(bool allowPartialBlock) {
   }
 
   ++counters_.writeAttempts;
-  audioWriteAttemptedInWindow_ = true;
+  imuWriteAttemptedInWindow_ = true;
   const uint32_t writeStartedUs = micros();
   const size_t written = imuFile_.write(&buffer_[bufferHead_], count);
   recordOperationDuration(micros() - writeStartedUs,
@@ -580,7 +580,7 @@ bool SdLogger::writeBufferedBytes(bool allowPartialBlock) {
     advanceBuffer(written);
     counters_.bytesWritten += written;
     ++counters_.writeSuccesses;
-    audioWriteSucceededInWindow_ = true;
+    imuWriteSucceededInWindow_ = true;
   }
   if (written != count) {
     ++counters_.writeFailures;
@@ -609,7 +609,7 @@ bool SdLogger::writeAudioBufferedBytes(bool allowPartialBlock) {
   }
 
   ++counters_.audioWriteAttempts;
-  imuWriteAttemptedInWindow_ = true;
+  audioWriteAttemptedInWindow_ = true;
   const uint32_t writeStartedUs = micros();
   const size_t written = audioFile_.write(&audioBuffer_[audioBufferHead_], count);
   recordOperationDuration(micros() - writeStartedUs,
@@ -619,7 +619,7 @@ bool SdLogger::writeAudioBufferedBytes(bool allowPartialBlock) {
     advanceAudioBuffer(written);
     counters_.audioBytesWritten += written;
     ++counters_.audioWriteSuccesses;
-    imuWriteSucceededInWindow_ = true;
+    audioWriteSucceededInWindow_ = true;
   }
   if (written != count) {
     ++counters_.audioWriteFailures;
@@ -682,7 +682,7 @@ void SdLogger::confirmCardFailure(const char* reason) {
 }
 
 void SdLogger::updateFailureIndicator() {
-  if (!failureConfirmed_) {
+  if (!failureConfirmed_ || !config::kSdFailureIndicatorEnabled) {
     return;
   }
 
