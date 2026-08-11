@@ -222,8 +222,12 @@ void setup() {
       Serial.print(sdLogger.sessionFolder());
       Serial.print(" buffer_bytes=");
       Serial.print(pet::config::kSdRamBufferBytes);
-      Serial.print(" block_bytes=");
-      Serial.print(pet::config::kSdWriteBlockBytes);
+      Serial.print(" imu_block_bytes=");
+      Serial.print(pet::config::kSdImuWriteBlockBytes);
+      Serial.print(" audio_block_bytes=");
+      Serial.print(pet::config::kSdAudioWriteBlockBytes);
+      Serial.print(" spi_clock_mhz=");
+      Serial.print(pet::config::kSdSpiClockMHz);
       Serial.print(" flush_packets=");
       Serial.print(pet::config::kSdPacketsPerFlush);
       Serial.print(" audio_buffer_bytes=");

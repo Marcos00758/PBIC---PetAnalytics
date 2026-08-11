@@ -148,11 +148,18 @@ binário permanecer desabilitado. Com SD válido, o contador persistente
 durante a sessão.
 
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
-escreve blocos de até 512 bytes depois da aquisição, faz flush a cada 1000
-pacotes e atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O status
-é substituído por arquivo temporário para evitar texto parcialmente reescrito.
-Uma janela de dois segundos exige pelo menos uma escrita bem-sucedida quando
-houve tentativas; uma janela inteira sem sucesso desativa somente o logger.
+escreve `imu.bin` em blocos de até 512 bytes, faz flush a cada 1000 pacotes e
+atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O áudio usa blocos
+de até 4096 bytes para reduzir a quantidade de chamadas ao cartão. Em cada
+passagem do loop ocorre no máximo uma escrita; quando as duas filas estão
+prontas, o logger escolhe a proporcionalmente mais cheia. O SPI do SD opera a
+12 MHz nesta configuração de robustez.
+
+A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
+de progresso inicia um período de dois segundos; qualquer escrita posterior
+com progresso cancela esse período. Somente dois segundos completos sem
+progresso confirmam a falha. Isso evita que uma única falha após uma operação
+longa seja interpretada como uma janela inteira de cartão indisponível.
 
 Uma falha definitiva emite `SD_ERROR_CONFIRMED` uma única vez pela Serial e
 desativa a gravação até o próximo reboot. Cinco segundos depois, o firmware
@@ -311,8 +318,8 @@ processamento nao usa `float` nem grava no SD dentro da interrupcao.
 O loop transfere os blocos para uma segunda fila de 32768 bytes pertencente ao
 `sd_logger`. A fila de captura tem 127 posicoes uteis, tambem cerca de 32 KiB;
 juntas oferecem aproximadamente 0,74 s de reserva a 44100 Hz. O logger mantem
-`imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve ambos em blocos de ate
-512 bytes. Flush, escrita e falha do audio possuem contadores e latencias
+`imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve o audio em blocos de
+ate 4096 bytes. Flush, escrita e falha do audio possuem contadores e latencias
 separados em `status.txt`. A janela de saude acompanha sucesso de cada arquivo
 separadamente, evitando que `imu.bin` mascare uma falha de `audio.raw` ou o
 inverso.
@@ -322,3 +329,10 @@ bloco DMA menos a duracao desse bloco. `meta.txt` registra formato, taxa,
 canal, alinhamento, timestamp e incerteza maxima de um bloco. A prealocacao foi
 mantida desativada porque SdFat exige truncamento no encerramento, enquanto a
 versao atual ainda admite desligamento direto sem uma rotina de fechamento.
+
+Capturas reais mostraram dois estados distintos do sinal. S010 ficou em cerca
+de `-51,7 dBFS` RMS, sem ruido aparente; S013 iniciou e permaneceu saturado,
+com `-13,3 dBFS` RMS e picos em escala completa. Como a saturacao ja existia
+nos primeiros segundos, ela nao foi causada pela falha posterior do SD. O
+firmware nao aplica ganho digital; alimentacao, GND, DOUT e sincronismo de boot
+do breakout ainda precisam ser validados antes de aceitar uma sessao de audio.

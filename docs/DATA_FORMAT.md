@@ -161,7 +161,9 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 `imu.bin` contem exatamente a concatenacao dos mesmos pacotes v4 de 79 bytes
 usados no stream USB, sem cabecalho e sem mensagens textuais. O arquivo fica
 aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
-dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. Um
+dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. O
+audio possui fila separada de 32768 bytes e e escrito em blocos de ate 4096
+bytes. Em cada passagem do loop ocorre no maximo uma escrita ao SD. Um
 desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
 
 `audio.raw` contem PCM mono assinado de 16 bits, little-endian, sem cabecalho,
@@ -186,6 +188,9 @@ canais, enderecos e status inicial dos sensores, contem:
 ```text
 packet_version=4
 packet_size=79
+sd_spi_clock_mhz=12
+sd_imu_write_block_bytes=512
+sd_audio_write_block_bytes=4096
 audio_enabled=1
 audio_file=audio.raw
 audio_format=pcm_s16le
@@ -229,6 +234,11 @@ de captura, blocos incompletos, maior ocupacao da fila, blocos aceitos ou
 descartados pelo buffer do SD, bytes escritos, tentativas e falhas. As maiores
 latencias e quantidades de escritas e flushes acima de 10 ms sao separadas das
 metricas de `imu.bin`.
+
+Quando uma falha e confirmada, a Serial emite `SD_ERROR_STATE` com tentativas,
+sucessos, falhas, bytes ainda em cada buffer, idade da falha e maior duracao de
+escrita observada para `imu.bin` e `audio.raw`. Esses dados sao mais atuais que
+o ultimo `status.txt`, que pode ter sido escrito minutos antes.
 
 ## Graficos
 

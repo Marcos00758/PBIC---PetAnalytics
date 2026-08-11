@@ -82,7 +82,7 @@ class SdLogger {
   bool writeAudioBufferedBytes(bool allowPartialBlock);
   void advanceBuffer(size_t count);
   void advanceAudioBuffer(size_t count);
-  void checkHealthWindow();
+  void checkWriteFailureTimeout();
   void confirmCardFailure(const char* reason);
   void recordOperationDuration(uint32_t durationUs, uint32_t& maximumUs,
                                uint32_t& slowOperations);
@@ -103,11 +103,10 @@ class SdLogger {
   uint32_t packetsAtLastFlush_ = 0;
   uint32_t packetsAtLastStatus_ = 0;
   uint32_t nextWriteRetryMs_ = 0;
-  uint32_t healthWindowStartedMs_ = 0;
-  bool imuWriteAttemptedInWindow_ = false;
-  bool imuWriteSucceededInWindow_ = false;
-  bool audioWriteAttemptedInWindow_ = false;
-  bool audioWriteSucceededInWindow_ = false;
+  uint32_t imuWriteFailureStartedMs_ = 0;
+  uint32_t audioWriteFailureStartedMs_ = 0;
+  bool imuWriteFailureActive_ = false;
+  bool audioWriteFailureActive_ = false;
   bool cardReady_ = false;
   bool sessionActive_ = false;
   bool failureConfirmed_ = false;
