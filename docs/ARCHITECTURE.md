@@ -149,11 +149,23 @@ durante a sessão.
 
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
 escreve blocos de até 512 bytes depois da aquisição, faz flush a cada 1000
-pacotes e atualiza `status.txt` a cada 6000 pacotes. O status é substituído por
-arquivo temporário para evitar texto parcialmente reescrito. Uma janela de dois
-segundos exige pelo menos uma escrita bem-sucedida quando houve tentativas; uma
-janela inteira sem sucesso desativa somente o logger. A remoção física ainda
-precisa ser validada no hardware real.
+pacotes e atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O status
+é substituído por arquivo temporário para evitar texto parcialmente reescrito.
+Uma janela de dois segundos exige pelo menos uma escrita bem-sucedida quando
+houve tentativas; uma janela inteira sem sucesso desativa somente o logger.
+
+Uma falha definitiva emite `SD_ERROR_CONFIRMED` uma única vez pela Serial e
+desativa a gravação até o próximo reboot. Cinco segundos depois, o firmware
+mantém `CS` alto, encerra o SPI e passa a usar o LED laranja integrado para dois
+pulsos curtos repetidos. O LED compartilha o pino 13 com `SCK` e nunca é
+controlado enquanto o SPI do SD estiver ativo. Não há tentativa de reinserção
+automática do cartão.
+
+O logger mede separadamente a maior duração de escrita, flush e atualização de
+status, além de contar operações de cada tipo com duração igual ou superior a
+10 ms. Esses valores permitem localizar a origem dos deadlines perdidos sem
+alterar o pacote dos sensores. A remoção física ainda precisa ser validada no
+hardware real.
 
 Durante o setup, cada BMP390 fornece os 21 bytes dos registradores NVM `0x31` a
 `0x45`. Eles são gravados em hexadecimal no `meta.txt`; o Python faz a

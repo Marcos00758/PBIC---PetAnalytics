@@ -42,6 +42,11 @@ nova pasta `/Sxxx`. O firmware não espera a USB e continua adquirindo sem
 computador. O arquivo `imu.bin` permanece aberto, recebe escritas em blocos a
 partir de um buffer RAM e faz flush periódico.
 
+Se o SD parar de aceitar escritas por uma janela completa, o firmware emite
+`SD_ERROR_CONFIRMED`, desativa a gravação até o reboot e, após cinco segundos,
+pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
+e só é controlado depois que o SPI foi encerrado com segurança.
+
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
 
 ```powershell

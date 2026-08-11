@@ -36,6 +36,12 @@ Teensy - SD
 3V3 - VCC
 GND - GND
 
+O LED laranja integrado da Teensy 4.0 tambem esta ligado ao pino 13. Enquanto o
+SD estiver ativo, o firmware nao controla esse LED: qualquer atividade visivel
+e consequencia do clock SPI. Somente depois de uma falha definitiva do SD, com
+`CS` em nivel alto e SPI encerrado, o pino 13 pode ser reutilizado para piscar
+um codigo de erro.
+
 - Microfone ICS43434
 Teensy - Microfone
 21 - BCLK

@@ -182,9 +182,12 @@ Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
 cruas e informa `bmp_compensation=unavailable_raw_only`.
 
-`status.txt` e atualizado inicialmente e depois a cada 6000 pacotes. Ele
-registra contadores de agendamento, I2C, magnetometros, BMPs, USB, fila do SD,
-bytes escritos, tentativas, falhas e flushes. A atualizacao usa `status.tmp` e
+`status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
+minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,
+BMPs, USB, fila do SD, bytes escritos, tentativas, falhas e flushes. Tambem
+registra as duracoes maximas de escrita, flush e atualizacao do proprio status,
+em microssegundos, e quantas dessas operacoes levaram pelo menos 10 ms. A
+atualizacao usa `status.tmp` e
 renomeacao; apos perda fisica do cartao, o ultimo status persistido naturalmente
 pode nao conter o evento que impediu a escrita.
 

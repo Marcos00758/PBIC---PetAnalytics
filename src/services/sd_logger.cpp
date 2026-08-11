@@ -37,26 +37,47 @@ void printIndexedCounters(File& file, const char* prefix,
 bool SdLogger::beginCard() {
   cardReady_ = false;
   sessionActive_ = false;
+  failureConfirmed_ = false;
+  failureIndicatorReady_ = false;
 
   pinMode(pins::kSdChipSelect, OUTPUT);
   digitalWrite(pins::kSdChipSelect, HIGH);
   if (!SD.begin(pins::kSdChipSelect)) {
+    confirmCardFailure("initialization");
     return false;
   }
 
   cardReady_ = verifyReadWrite();
+  if (!cardReady_) {
+    confirmCardFailure("read_write_diagnostic");
+  }
   return cardReady_;
 }
 
 bool SdLogger::beginSession(
     const SdSessionMetadata& metadata,
     const AcquisitionCounters& acquisitionCounters) {
-  if (!cardReady_ || !chooseSessionNumber()) {
+  if (!cardReady_) {
     return false;
   }
-
-  if (!SD.mkdir(sessionFolder_) || !persistSessionNumber() ||
-      !writeMetadata(metadata) || !createAudioPlaceholder()) {
+  if (!chooseSessionNumber()) {
+    confirmCardFailure("session_number");
+    return false;
+  }
+  if (!SD.mkdir(sessionFolder_)) {
+    confirmCardFailure("session_directory");
+    return false;
+  }
+  if (!persistSessionNumber()) {
+    confirmCardFailure("session_counter");
+    return false;
+  }
+  if (!writeMetadata(metadata)) {
+    confirmCardFailure("metadata");
+    return false;
+  }
+  if (!createAudioPlaceholder()) {
+    confirmCardFailure("audio_placeholder");
     return false;
   }
 
@@ -65,6 +86,7 @@ bool SdLogger::beginSession(
   SD.remove(imuPath);
   imuFile_ = SD.open(imuPath, FILE_WRITE);
   if (!imuFile_) {
+    confirmCardFailure("imu_open");
     return false;
   }
 
@@ -80,8 +102,13 @@ bool SdLogger::beginSession(
   sessionMetadata_ = metadata;
   sessionActive_ = true;
 
-  if (!writeStatus(acquisitionCounters, "recording")) {
-    handleCardFailure();
+  const uint32_t statusStartedUs = micros();
+  const bool statusWritten = writeStatus(acquisitionCounters, "recording");
+  recordOperationDuration(micros() - statusStartedUs,
+                          counters_.maxStatusDurationUs,
+                          counters_.slowStatusUpdates);
+  if (!statusWritten) {
+    confirmCardFailure("initial_status");
     return false;
   }
   return true;
@@ -125,7 +152,11 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters) {
       counters_.packetsQueued - packetsAtLastFlush_ >=
       config::kSdPacketsPerFlush;
   if (flushDue && bufferedBytes_ == 0 && sessionActive_) {
+    const uint32_t flushStartedUs = micros();
     imuFile_.flush();
+    recordOperationDuration(micros() - flushStartedUs,
+                            counters_.maxFlushDurationUs,
+                            counters_.slowFlushes);
     ++counters_.flushes;
     packetsAtLastFlush_ = counters_.packetsQueued;
   }
@@ -134,8 +165,15 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters) {
       counters_.packetsQueued - packetsAtLastStatus_ >=
       config::kSdPacketsPerStatusUpdate;
   if (statusDue && bufferedBytes_ == 0 && sessionActive_) {
-    if (writeStatus(acquisitionCounters, "recording")) {
+    const uint32_t statusStartedUs = micros();
+    const bool statusWritten = writeStatus(acquisitionCounters, "recording");
+    recordOperationDuration(micros() - statusStartedUs,
+                            counters_.maxStatusDurationUs,
+                            counters_.slowStatusUpdates);
+    if (statusWritten) {
       packetsAtLastStatus_ = counters_.packetsQueued;
+    } else {
+      confirmCardFailure("status_update");
     }
   }
 
@@ -371,6 +409,18 @@ bool SdLogger::writeStatus(
   file.println(counters_.writeFailures);
   file.print("sd_flushes=");
   file.println(counters_.flushes);
+  file.print("sd_max_write_duration_us=");
+  file.println(counters_.maxWriteDurationUs);
+  file.print("sd_max_flush_duration_us=");
+  file.println(counters_.maxFlushDurationUs);
+  file.print("sd_max_status_duration_us=");
+  file.println(counters_.maxStatusDurationUs);
+  file.print("sd_slow_writes_over_10ms=");
+  file.println(counters_.slowWrites);
+  file.print("sd_slow_flushes_over_10ms=");
+  file.println(counters_.slowFlushes);
+  file.print("sd_slow_status_updates_over_10ms=");
+  file.println(counters_.slowStatusUpdates);
   file.flush();
   file.close();
 
@@ -395,7 +445,11 @@ bool SdLogger::writeBufferedBytes(bool allowPartialBlock) {
 
   ++counters_.writeAttempts;
   writeAttemptedInWindow_ = true;
+  const uint32_t writeStartedUs = micros();
   const size_t written = imuFile_.write(&buffer_[bufferHead_], count);
+  recordOperationDuration(micros() - writeStartedUs,
+                          counters_.maxWriteDurationUs,
+                          counters_.slowWrites);
   if (written > 0) {
     advanceBuffer(written);
     counters_.bytesWritten += written;
@@ -421,7 +475,7 @@ void SdLogger::checkHealthWindow() {
     return;
   }
   if (writeAttemptedInWindow_ && !writeSucceededInWindow_) {
-    handleCardFailure();
+    confirmCardFailure("write_health_window");
     return;
   }
   healthWindowStartedMs_ = nowMs;
@@ -429,11 +483,61 @@ void SdLogger::checkHealthWindow() {
   writeSucceededInWindow_ = false;
 }
 
-void SdLogger::handleCardFailure() {
+void SdLogger::confirmCardFailure(const char* reason) {
+  if (failureConfirmed_) {
+    return;
+  }
+  failureConfirmed_ = true;
+  failureConfirmedAtMs_ = millis();
   sessionActive_ = false;
   cardReady_ = false;
+  Serial.print("SD_ERROR_CONFIRMED reason=");
+  Serial.print(reason);
+  Serial.print(" recording_disabled=1 reboot_required=1 led_delay_ms=");
+  Serial.println(config::kSdFailureLedDelayMs);
   if (imuFile_) {
     imuFile_.close();
+  }
+  digitalWrite(pins::kSdChipSelect, HIGH);
+}
+
+void SdLogger::updateFailureIndicator() {
+  if (!failureConfirmed_) {
+    return;
+  }
+
+  const uint32_t elapsedMs = millis() - failureConfirmedAtMs_;
+  if (elapsedMs < config::kSdFailureLedDelayMs) {
+    return;
+  }
+  if (!failureIndicatorReady_) {
+    digitalWrite(pins::kSdChipSelect, HIGH);
+    SPI.end();
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+    failureIndicatorReady_ = true;
+    Serial.println("SD_ERROR_SIGNAL led=orange_blink spi=disabled");
+  }
+
+  const uint32_t phaseMs =
+      (elapsedMs - config::kSdFailureLedDelayMs) %
+      config::kSdFailureLedCycleMs;
+  const bool ledOn =
+      phaseMs < config::kSdFailureLedPulseMs ||
+      (phaseMs >= config::kSdFailureLedSecondPulseMs &&
+       phaseMs < config::kSdFailureLedSecondPulseMs +
+                     config::kSdFailureLedPulseMs);
+  digitalWrite(LED_BUILTIN, ledOn ? HIGH : LOW);
+}
+
+void SdLogger::recordOperationDuration(uint32_t durationUs,
+                                       uint32_t& maximumUs,
+                                       uint32_t& slowOperations) {
+  if (durationUs > maximumUs) {
+    maximumUs = durationUs;
+  }
+  if (durationUs >= config::kSdSlowOperationThresholdUs) {
+    ++slowOperations;
   }
 }
 

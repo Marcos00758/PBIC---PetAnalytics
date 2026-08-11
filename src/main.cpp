@@ -122,8 +122,9 @@ void setup() {
   Serial.print(" SCK=");
   Serial.println(pet::pins::kSdSck);
   const bool sdCardReady = sdLogger.beginCard();
-  Serial.println(sdCardReady ? "SD read/write diagnostic OK"
-                             : "SD unavailable; USB stream remains enabled");
+  Serial.println(sdCardReady
+                     ? "SD read/write diagnostic OK"
+                     : "SD unavailable; recording disabled until reboot");
 
   Serial.print("Wire pins SDA=");
   Serial.print(pet::pins::kI2cSda);
@@ -193,7 +194,7 @@ void setup() {
       Serial.print(" flush_packets=");
       Serial.println(pet::config::kSdPacketsPerFlush);
     } else {
-      Serial.println("SD session creation FAILED; USB stream remains enabled");
+      Serial.println("SD session creation FAILED; recording disabled until reboot");
     }
   }
 
@@ -222,6 +223,8 @@ void setup() {
 }
 
 void loop() {
+  sdLogger.updateFailureIndicator();
+
   if (!acquisitionReady) {
     return;
   }

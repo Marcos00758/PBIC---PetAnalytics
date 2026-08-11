@@ -26,6 +26,12 @@ struct SdLoggerCounters {
   uint32_t writeSuccesses = 0;
   uint32_t writeFailures = 0;
   uint32_t flushes = 0;
+  uint32_t maxWriteDurationUs = 0;
+  uint32_t maxFlushDurationUs = 0;
+  uint32_t maxStatusDurationUs = 0;
+  uint32_t slowWrites = 0;
+  uint32_t slowFlushes = 0;
+  uint32_t slowStatusUpdates = 0;
 };
 
 class SdLogger {
@@ -35,9 +41,11 @@ class SdLogger {
                     const AcquisitionCounters& acquisitionCounters);
   bool enqueue(const data::ImuPacket& packet);
   void service(const AcquisitionCounters& acquisitionCounters);
+  void updateFailureIndicator();
 
   bool cardReady() const { return cardReady_; }
   bool sessionActive() const { return sessionActive_; }
+  bool failureConfirmed() const { return failureConfirmed_; }
   uint32_t sessionNumber() const { return sessionNumber_; }
   const char* sessionFolder() const { return sessionFolder_; }
   const SdLoggerCounters& counters() const { return counters_; }
@@ -53,7 +61,9 @@ class SdLogger {
   bool writeBufferedBytes(bool allowPartialBlock);
   void advanceBuffer(size_t count);
   void checkHealthWindow();
-  void handleCardFailure();
+  void confirmCardFailure(const char* reason);
+  void recordOperationDuration(uint32_t durationUs, uint32_t& maximumUs,
+                               uint32_t& slowOperations);
   void buildPath(char* destination, size_t length, const char* filename) const;
 
   File imuFile_;
@@ -71,6 +81,9 @@ class SdLogger {
   bool writeSucceededInWindow_ = false;
   bool cardReady_ = false;
   bool sessionActive_ = false;
+  bool failureConfirmed_ = false;
+  bool failureIndicatorReady_ = false;
+  uint32_t failureConfirmedAtMs_ = 0;
   SdSessionMetadata sessionMetadata_{};
   SdLoggerCounters counters_{};
 };

@@ -13,9 +13,14 @@ constexpr char kFirmwareVersion[] = "0.2.0";
 constexpr size_t kSdRamBufferBytes = 8192;
 constexpr size_t kSdWriteBlockBytes = 512;
 constexpr uint32_t kSdPacketsPerFlush = 1000;
-constexpr uint32_t kSdPacketsPerStatusUpdate = 6000;
+constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
 constexpr uint32_t kSdHealthWindowMs = 2000;
 constexpr uint32_t kSdWriteRetryMs = 20;
+constexpr uint32_t kSdFailureLedDelayMs = 5000;
+constexpr uint32_t kSdFailureLedCycleMs = 1200;
+constexpr uint32_t kSdFailureLedPulseMs = 150;
+constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
+constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
 static_assert(kSdRamBufferBytes % kSdWriteBlockBytes == 0,
               "SD RAM buffer must contain complete write blocks");
 
