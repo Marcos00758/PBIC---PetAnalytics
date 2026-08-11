@@ -6,6 +6,9 @@ namespace pet::config {
 
 constexpr uint32_t kSerialBaud = 115200;
 constexpr bool kUsbBinaryStreamEnabled = false;
+constexpr bool kMicrophoneDiagnosticEnabled = true;
+constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
+constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
 constexpr uint32_t kI2cClockHz = 400000;
 
 constexpr char kFirmwareVersion[] = "0.2.0";

@@ -100,3 +100,18 @@ Para estimar uma calibracao magnetica inicial depois de uma rotacao 3D ampla:
 ```powershell
 python python/calibrate_magnetometer.py data/rotacao_3d.bin
 ```
+
+## Diagnostico do microfone
+
+Na branch de audio, `kMicrophoneDiagnosticEnabled=true` inicia somente o
+ICS43434 em RAM. SD, PCA9548A e sensores nao sao inicializados nesse modo. O
+monitor serial informa, a cada dois segundos, taxa efetiva, perdas da fila,
+uso de memoria, DC, RMS, clipping e atividade dos dois canais.
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --target upload --target monitor --upload-port COM3
+```
+
+O teste deve incluir alguns segundos em silencio, fala em nivel normal e sons
+fortes sem encostar no microfone. O canal esperado e o esquerdo porque `SEL`
+esta ligado ao GND.

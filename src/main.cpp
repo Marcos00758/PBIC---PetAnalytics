@@ -5,6 +5,7 @@
 #include "config/pins.h"
 #include "data/imu_packet.h"
 #include "drivers/bmp390.h"
+#include "drivers/ics43434.h"
 #include "drivers/icm20948.h"
 #include "drivers/pca9548a.h"
 #include "services/imu_acquisition.h"
@@ -26,6 +27,7 @@ pet::services::ImuAcquisition acquisition(
     pet::config::kBmpSamplesPerImuSample,
     pet::config::kMagSamplesPerImuSample);
 pet::services::SdLogger sdLogger;
+pet::drivers::Ics43434Diagnostic microphoneDiagnostic;
 
 bool acquisitionReady = false;
 
@@ -110,6 +112,13 @@ bool initializeBmp(pet::drivers::Bmp390& bmp) {
 
 void setup() {
   Serial.begin(pet::config::kSerialBaud);
+
+  if (pet::config::kMicrophoneDiagnosticEnabled) {
+    Serial.println();
+    Serial.println("PBIC / Pet Analytics - ICS43434 RAM diagnostic");
+    microphoneDiagnostic.begin();
+    return;
+  }
 
   Serial.println();
   Serial.println("PBIC / Pet Analytics - synchronized ICM acquisition");
@@ -223,6 +232,11 @@ void setup() {
 }
 
 void loop() {
+  if (pet::config::kMicrophoneDiagnosticEnabled) {
+    microphoneDiagnostic.poll();
+    return;
+  }
+
   sdLogger.updateFailureIndicator();
 
   if (!acquisitionReady) {

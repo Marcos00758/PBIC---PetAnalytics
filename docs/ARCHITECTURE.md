@@ -269,3 +269,27 @@ sobre toda a sessão, mas limita os pontos mantidos para gráficos. A ferramenta
 `python/calibrate_magnetometer.py` produz uma estimativa inicial de hard-iron e
 soft-iron diagonal somente quando a captura cobre rotação suficiente nos três
 eixos.
+
+## Diagnostico inicial do ICS43434
+
+O diagnostico usa `AudioInputI2S` da Audio Library 1.3 fornecida pelo core
+Teensyduino 1.62, sem dependencia externa no `platformio.ini`. A implementacao
+oficial para Teensy 4.x fixa `BCLK=21`, `LRCLK=20` e `RX=8`; o breakout mantem
+`SEL=GND`, portanto o sinal deve aparecer na porta esquerda. Fontes primarias:
+
+- https://www.pjrc.com/teensy/gui/index.html?info=AudioInputI2S
+- https://github.com/PaulStoffregen/Audio
+- https://cdn-shop.adafruit.com/product-files/6049/6049_DS-000069-ICS-43434-v1.2.pdf
+
+A biblioteca trabalha a 44100 Hz, em blocos de 128 amostras `int16`. O SAI
+recebe slots I2S de 32 bits, mas o DMA oficial copia apenas os 16 bits mais
+significativos de cada canal. Assim, os oito bits menos significativos da
+amostra nativa de 24 bits do ICS43434 nao ficam disponiveis nesse caminho.
+
+O modo `kMicrophoneDiagnosticEnabled=true` e isolado: nao inicializa SD, I2C ou
+os demais sensores e nao cria arquivos. Um destino `AudioStream` proprio copia
+os canais esquerdo e direito para uma fila circular em RAM com 16 blocos e
+conta explicitamente overflow e blocos incompletos. O loop calcula taxa real,
+DC, RMS AC, faixa, clipping, bits ocupados no container PCM16, atividade do LSB,
+uso de memoria e CPU. A escolha entre armazenar PCM16 ou implementar um caminho
+DMA de 24/32 bits sera feita depois dos resultados do hardware.
