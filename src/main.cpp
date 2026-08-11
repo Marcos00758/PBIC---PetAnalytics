@@ -9,6 +9,7 @@
 #include "drivers/icm20948.h"
 #include "drivers/pca9548a.h"
 #include "services/imu_acquisition.h"
+#include "services/audio_capture.h"
 #include "services/sd_logger.h"
 
 namespace {
@@ -28,6 +29,7 @@ pet::services::ImuAcquisition acquisition(
     pet::config::kMagSamplesPerImuSample);
 pet::services::SdLogger sdLogger;
 pet::drivers::Ics43434Diagnostic microphoneDiagnostic;
+pet::services::AudioCapture audioCapture;
 
 bool acquisitionReady = false;
 
@@ -192,8 +194,30 @@ void setup() {
   }
   mux.disableAllChannels();
 
+  if (pet::config::kMicrophoneRecordingEnabled && sdCardReady && sensorsReady &&
+      bmpsReady) {
+    sessionMetadata.audioEnabled = audioCapture.begin();
+    const uint32_t timestampDeadlineMs = millis() + 50U;
+    while (sessionMetadata.audioEnabled &&
+           audioCapture.firstSampleTimestampUs() == 0 &&
+           static_cast<int32_t>(millis() - timestampDeadlineMs) < 0) {
+      yield();
+    }
+    sessionMetadata.audioStartTimestampUs =
+        audioCapture.firstSampleTimestampUs();
+    sessionMetadata.audioStartTimestampValid =
+        sessionMetadata.audioStartTimestampUs != 0;
+    Serial.print("AUDIO_CAPTURE_START format=pcm_s16le sample_rate_hz=");
+    Serial.print(pet::config::kMicrophoneSampleRateHz);
+    Serial.print(" channels=1 block_samples=");
+    Serial.print(pet::config::kMicrophoneBlockSamples);
+    Serial.print(" first_sample_timestamp_us=");
+    Serial.println(sessionMetadata.audioStartTimestampUs);
+  }
+
   if (sdCardReady) {
-    if (sdLogger.beginSession(sessionMetadata, acquisition.counters())) {
+    if (sdLogger.beginSession(sessionMetadata, acquisition.counters(),
+                              audioCapture.counters())) {
       Serial.print("SD_SESSION_START folder=");
       Serial.print(sdLogger.sessionFolder());
       Serial.print(" buffer_bytes=");
@@ -201,7 +225,9 @@ void setup() {
       Serial.print(" block_bytes=");
       Serial.print(pet::config::kSdWriteBlockBytes);
       Serial.print(" flush_packets=");
-      Serial.println(pet::config::kSdPacketsPerFlush);
+      Serial.print(pet::config::kSdPacketsPerFlush);
+      Serial.print(" audio_buffer_bytes=");
+      Serial.println(pet::config::kSdAudioRamBufferBytes);
     } else {
       Serial.println("SD session creation FAILED; recording disabled until reboot");
     }
@@ -244,19 +270,22 @@ void loop() {
   }
 
   pet::data::ImuPacket packet{};
-  if (!acquisition.poll(packet)) {
-    return;
-  }
+  if (acquisition.poll(packet)) {
+    sdLogger.enqueue(packet);
 
-  sdLogger.enqueue(packet);
-
-  if (pet::config::kUsbBinaryStreamEnabled) {
-    if (Serial && Serial.availableForWrite() >=
-                      static_cast<int>(sizeof(pet::data::ImuPacket))) {
-      Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
-    } else {
-      acquisition.recordUsbDrop();
+    if (pet::config::kUsbBinaryStreamEnabled) {
+      if (Serial && Serial.availableForWrite() >=
+                        static_cast<int>(sizeof(pet::data::ImuPacket))) {
+        Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+      } else {
+        acquisition.recordUsbDrop();
+      }
     }
   }
-  sdLogger.service(acquisition.counters());
+
+  pet::services::AudioPcmBlock audioBlock{};
+  while (sdLogger.canEnqueueAudioBlock() && audioCapture.pop(audioBlock)) {
+    sdLogger.enqueueAudio(audioBlock);
+  }
+  sdLogger.service(acquisition.counters(), audioCapture.counters());
 }

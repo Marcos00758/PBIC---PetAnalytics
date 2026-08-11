@@ -293,3 +293,32 @@ conta explicitamente overflow e blocos incompletos. O loop calcula taxa real,
 DC, RMS AC, faixa, clipping, bits ocupados no container PCM16, atividade do LSB,
 uso de memoria e CPU. A escolha entre armazenar PCM16 ou implementar um caminho
 DMA de 24/32 bits sera feita depois dos resultados do hardware.
+
+O diagnostico em hardware confirmou cerca de 44100 amostras/s, sinal somente
+no canal esquerdo, DC proximo de zero e nenhuma perda da fila em 40 segundos.
+Sons usuais ocuparam ate 14 bits do PCM16; por isso o formato inicial de coleta
+e PCM mono `int16` little-endian. Os 24 bits nativos continuam sendo uma opcao
+futura, mas nao justificam neste momento substituir o DMA oficial e estavel.
+
+## Captura e gravacao de audio
+
+`src/services/audio_capture` usa `AudioInputI2S`, cujo recebimento no Teensy
+4.0 e feito por DMA, e conecta apenas a porta esquerda a um `AudioStream`
+proprio. O callback copia blocos de 128 amostras para uma fila circular mono e
+conta blocos recebidos, overflow, blocos incompletos e maior ocupacao. O
+processamento nao usa `float` nem grava no SD dentro da interrupcao.
+
+O loop transfere os blocos para uma segunda fila de 32768 bytes pertencente ao
+`sd_logger`. A fila de captura tem 127 posicoes uteis, tambem cerca de 32 KiB;
+juntas oferecem aproximadamente 0,74 s de reserva a 44100 Hz. O logger mantem
+`imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve ambos em blocos de ate
+512 bytes. Flush, escrita e falha do audio possuem contadores e latencias
+separados em `status.txt`. A janela de saude acompanha sucesso de cada arquivo
+separadamente, evitando que `imu.bin` mascare uma falha de `audio.raw` ou o
+inverso.
+
+O primeiro timestamp de audio e estimado pelo instante de entrega do primeiro
+bloco DMA menos a duracao desse bloco. `meta.txt` registra formato, taxa,
+canal, alinhamento, timestamp e incerteza maxima de um bloco. A prealocacao foi
+mantida desativada porque SdFat exige truncamento no encerramento, enquanto a
+versao atual ainda admite desligamento direto sem uma rotina de fechamento.

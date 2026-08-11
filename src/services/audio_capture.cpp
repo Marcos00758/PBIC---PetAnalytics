@@ -1,0 +1,119 @@
+#include "services/audio_capture.h"
+
+#include <string.h>
+
+#include "config/pins.h"
+
+namespace pet::services {
+namespace {
+
+constexpr uint32_t kAudioBlockDurationUs =
+    (static_cast<uint64_t>(config::kMicrophoneBlockSamples) * 1000000ULL +
+     config::kMicrophoneSampleRateHz / 2U) /
+    config::kMicrophoneSampleRateHz;
+
+uint16_t queueCount(uint16_t head, uint16_t tail) {
+  return head >= tail
+             ? head - tail
+             : config::kMicrophoneQueueBlocks + head - tail;
+}
+
+}  // namespace
+
+static_assert(AUDIO_BLOCK_SAMPLES == config::kMicrophoneBlockSamples,
+              "Teensy Audio block size changed");
+static_assert(static_cast<uint32_t>(AUDIO_SAMPLE_RATE_EXACT) ==
+                  config::kMicrophoneSampleRateHz,
+              "Teensy Audio sample rate changed");
+
+AudioCaptureSink::AudioCaptureSink() : AudioStream(1, inputQueueArray_) {}
+
+bool AudioCaptureSink::pop(AudioPcmBlock& block) {
+  const uint16_t tail = tail_;
+  if (tail == head_) {
+    return false;
+  }
+  memcpy(block.samples, queue_[tail].samples, sizeof(block.samples));
+  __disable_irq();
+  tail_ = static_cast<uint16_t>((tail + 1U) % config::kMicrophoneQueueBlocks);
+  __enable_irq();
+  return true;
+}
+
+AudioCaptureCounters AudioCaptureSink::counters() const {
+  AudioCaptureCounters snapshot{};
+  __disable_irq();
+  snapshot.blocksReceived = blocksReceived_;
+  snapshot.blocksDropped = blocksDropped_;
+  snapshot.incompleteBlocks = incompleteBlocks_;
+  snapshot.queueHighWaterBlocks = queueHighWaterBlocks_;
+  __enable_irq();
+  snapshot.samplesReceived =
+      snapshot.blocksReceived * config::kMicrophoneBlockSamples;
+  return snapshot;
+}
+
+uint32_t AudioCaptureSink::firstSampleTimestampUs() const {
+  __disable_irq();
+  const uint32_t timestamp = firstSampleTimestampUs_;
+  __enable_irq();
+  return timestamp;
+}
+
+void AudioCaptureSink::update() {
+  audio_block_t* left = receiveReadOnly(0);
+  if (left == nullptr) {
+    ++incompleteBlocks_;
+    return;
+  }
+
+  if (firstSampleTimestampUs_ == 0) {
+    firstSampleTimestampUs_ = micros() - kAudioBlockDurationUs;
+  }
+
+  ++blocksReceived_;
+  const uint16_t nextHead = static_cast<uint16_t>(
+      (head_ + 1U) % config::kMicrophoneQueueBlocks);
+  if (nextHead == tail_) {
+    ++blocksDropped_;
+  } else {
+    memcpy(queue_[head_].samples, left->data, sizeof(queue_[head_].samples));
+    head_ = nextHead;
+    const uint16_t count = queueCount(head_, tail_);
+    if (count > queueHighWaterBlocks_) {
+      queueHighWaterBlocks_ = count;
+    }
+  }
+  release(left);
+}
+
+bool AudioCapture::begin() {
+  static_assert(pins::kMicBclk == 21,
+                "Teensy 4.x AudioInputI2S BCLK is pin 21");
+  static_assert(pins::kMicLrclk == 20,
+                "Teensy 4.x AudioInputI2S LRCLK is pin 20");
+  static_assert(pins::kMicData == 8,
+                "Teensy 4.x AudioInputI2S RX is pin 8");
+
+  AudioMemory(config::kMicrophoneAudioMemoryBlocks);
+  static AudioInputI2S input;
+  static AudioConnection leftConnection(input, 0, sink_, 0);
+  input_ = &input;
+  leftConnection_ = &leftConnection;
+  started_ = true;
+  return true;
+}
+
+bool AudioCapture::pop(AudioPcmBlock& block) {
+  return started_ && sink_.pop(block);
+}
+
+AudioCaptureCounters AudioCapture::counters() const {
+  return sink_.counters();
+}
+
+uint32_t AudioCapture::firstSampleTimestampUs() const {
+  return sink_.firstSampleTimestampUs();
+}
+
+}  // namespace pet::services

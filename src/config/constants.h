@@ -6,14 +6,21 @@ namespace pet::config {
 
 constexpr uint32_t kSerialBaud = 115200;
 constexpr bool kUsbBinaryStreamEnabled = false;
-constexpr bool kMicrophoneDiagnosticEnabled = true;
+constexpr bool kMicrophoneDiagnosticEnabled = false;
+constexpr bool kMicrophoneRecordingEnabled = true;
 constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
 constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
+constexpr uint16_t kMicrophoneQueueBlocks = 128;
+constexpr uint32_t kMicrophoneSampleRateHz = 44100;
+constexpr uint16_t kMicrophoneBlockSamples = 128;
+constexpr uint8_t kMicrophoneChannels = 1;
+constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.2.0";
+constexpr char kFirmwareVersion[] = "0.3.0";
 
 constexpr size_t kSdRamBufferBytes = 8192;
+constexpr size_t kSdAudioRamBufferBytes = 32768;
 constexpr size_t kSdWriteBlockBytes = 512;
 constexpr uint32_t kSdPacketsPerFlush = 1000;
 constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
@@ -26,6 +33,11 @@ constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
 constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
 static_assert(kSdRamBufferBytes % kSdWriteBlockBytes == 0,
               "SD RAM buffer must contain complete write blocks");
+static_assert(kSdAudioRamBufferBytes % kSdWriteBlockBytes == 0,
+              "audio SD RAM buffer must contain complete write blocks");
+static_assert(kMicrophoneBlockSamples * sizeof(int16_t) <=
+                  kSdAudioRamBufferBytes,
+              "audio SD buffer must contain a complete audio block");
 
 constexpr uint8_t kPca9548aAddress = 0x70;
 constexpr uint16_t kPcaChannelSettleUs = 80;

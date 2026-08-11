@@ -164,12 +164,38 @@ aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
 dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. Um
 desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
 
+`audio.raw` contem PCM mono assinado de 16 bits, little-endian, sem cabecalho,
+capturado do canal esquerdo do ICS43434 a 44100 Hz. Cada amostra ocupa dois
+bytes e o volume nominal e 88200 bytes/s, aproximadamente 158,76 MB em 30
+minutos. O arquivo fica aberto junto de `imu.bin`. A fila DMA/RAM de captura e
+a fila do SD sao independentes das filas dos pacotes IMU.
+
+O timestamp inicial do audio usa a mesma origem `micros()` dos pacotes IMU. Ele
+e estimado no recebimento do primeiro bloco DMA, subtraindo a duracao de 128
+amostras. A incerteza documentada e de ate um bloco, aproximadamente 2903 us;
+nao existe timestamp por bloco dentro de `audio.raw`. O indice de uma amostra
+pode ser convertido para a linha de tempo da sessao por:
+
+```text
+audio_timestamp_us = audio_start_timestamp_us + sample_index * 1000000 / 44100
+```
+
 `meta.txt` e um arquivo ASCII `chave=valor`. Alem de versao, taxas, faixas,
 canais, enderecos e status inicial dos sensores, contem:
 
 ```text
 packet_version=4
 packet_size=79
+audio_enabled=1
+audio_file=audio.raw
+audio_format=pcm_s16le
+audio_byte_order=little
+audio_sample_rate_hz=44100
+audio_channels=1
+audio_bits_per_sample=16
+audio_block_samples=128
+audio_start_timestamp_valid=1
+audio_start_timestamp_us=<micros estimado da primeira amostra>
 bmp0_nvm_valid=1
 bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1
@@ -182,6 +208,13 @@ Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
 cruas e informa `bmp_compensation=unavailable_raw_only`.
 
+A prealocacao SdFat foi avaliada e permanece desativada. `preAllocate()` muda o
+tamanho logico do arquivo e requer `truncate()` no encerramento para remover a
+area nao escrita. Como o wearable ainda nao possui comando de parada e pode
+ser desligado diretamente, habilita-la produziria arquivos com cauda invalida
+apos perda de energia. As filas RAM foram dimensionadas para absorver as
+pausas de SD observadas sem depender dessa operacao.
+
 `status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
 minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,
 BMPs, USB, fila do SD, bytes escritos, tentativas, falhas e flushes. Tambem
@@ -190,6 +223,12 @@ em microssegundos, e quantas dessas operacoes levaram pelo menos 10 ms. A
 atualizacao usa `status.tmp` e
 renomeacao; apos perda fisica do cartao, o ultimo status persistido naturalmente
 pode nao conter o evento que impediu a escrita.
+
+Para o audio, `status.txt` registra blocos recebidos pelo DMA, overflow da fila
+de captura, blocos incompletos, maior ocupacao da fila, blocos aceitos ou
+descartados pelo buffer do SD, bytes escritos, tentativas e falhas. As maiores
+latencias e quantidades de escritas e flushes acima de 10 ms sao separadas das
+metricas de `imu.bin`.
 
 ## Graficos
 

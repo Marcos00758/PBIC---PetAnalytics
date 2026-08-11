@@ -35,6 +35,12 @@ contadores da aquisição e do SD.
 O formato completo está em
 `docs/DATA_FORMAT.md`.
 
+O ICS43434 e capturado pelo DMA da biblioteca `Audio` oficial da Teensy em
+PCM mono `int16`, 44100 Hz, canal esquerdo. Cada sessao mantem `imu.bin` e
+`audio.raw` abertos simultaneamente, com filas RAM independentes. O arquivo de
+audio nao possui cabecalho; os parametros e o timestamp estimado da primeira
+amostra ficam em `meta.txt`.
+
 ## Sessões no cartão SD
 
 Com um cartão FAT ou exFAT conectado nos pinos documentados, cada boot cria uma
@@ -103,7 +109,7 @@ python python/calibrate_magnetometer.py data/rotacao_3d.bin
 
 ## Diagnostico do microfone
 
-Na branch de audio, `kMicrophoneDiagnosticEnabled=true` inicia somente o
+`kMicrophoneDiagnosticEnabled=true` inicia somente o
 ICS43434 em RAM. SD, PCA9548A e sensores nao sao inicializados nesse modo. O
 monitor serial informa, a cada dois segundos, taxa efetiva, perdas da fila,
 uso de memoria, DC, RMS, clipping e atividade dos dois canais.
@@ -115,3 +121,7 @@ uso de memoria, DC, RMS, clipping e atividade dos dois canais.
 O teste deve incluir alguns segundos em silencio, fala em nivel normal e sons
 fortes sem encostar no microfone. O canal esperado e o esquerdo porque `SEL`
 esta ligado ao GND.
+
+Na configuracao normal, `kMicrophoneDiagnosticEnabled=false` e
+`kMicrophoneRecordingEnabled=true`. Nesse modo `audio.raw` e gravado junto de
+`imu.bin`; o diagnostico isolado nao cria arquivos.
