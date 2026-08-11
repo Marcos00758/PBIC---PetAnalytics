@@ -6,6 +6,7 @@ namespace pet::drivers {
 namespace {
 
 constexpr uint8_t kDataRegister = 0x04;
+constexpr uint8_t kNvmStartRegister = 0x31;
 constexpr uint8_t kOversamplingRegister = 0x1C;
 constexpr uint8_t kOutputDataRateRegister = 0x1D;
 constexpr uint8_t kPowerControlRegister = 0x1B;
@@ -79,6 +80,13 @@ bool Bmp390::readRaw(Bmp390RawSample& sample) {
   sample.pressure = decodeLittleEndianUint24(&data[0]);
   sample.temperature = decodeLittleEndianUint24(&data[3]);
   return true;
+}
+
+bool Bmp390::readNvm(uint8_t (&data)[kBmp390NvmLength]) {
+  if (!initialized_ || !mux_.selectChannel(muxChannel_)) {
+    return false;
+  }
+  return readRegisters(kNvmStartRegister, data, sizeof(data));
 }
 
 bool Bmp390::addressResponds(uint8_t address) {

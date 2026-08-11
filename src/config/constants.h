@@ -5,8 +5,24 @@
 namespace pet::config {
 
 constexpr uint32_t kSerialBaud = 115200;
-constexpr uint32_t kSerialWaitTimeoutMs = 3000;
+constexpr bool kUsbBinaryStreamEnabled = false;
 constexpr uint32_t kI2cClockHz = 400000;
+
+constexpr char kFirmwareVersion[] = "0.2.0";
+
+constexpr size_t kSdRamBufferBytes = 8192;
+constexpr size_t kSdWriteBlockBytes = 512;
+constexpr uint32_t kSdPacketsPerFlush = 1000;
+constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
+constexpr uint32_t kSdHealthWindowMs = 2000;
+constexpr uint32_t kSdWriteRetryMs = 20;
+constexpr uint32_t kSdFailureLedDelayMs = 5000;
+constexpr uint32_t kSdFailureLedCycleMs = 1200;
+constexpr uint32_t kSdFailureLedPulseMs = 150;
+constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
+constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
+static_assert(kSdRamBufferBytes % kSdWriteBlockBytes == 0,
+              "SD RAM buffer must contain complete write blocks");
 
 constexpr uint8_t kPca9548aAddress = 0x70;
 constexpr uint16_t kPcaChannelSettleUs = 80;

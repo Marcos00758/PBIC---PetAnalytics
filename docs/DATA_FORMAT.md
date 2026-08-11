@@ -127,8 +127,8 @@ Se o loop perder periodos, nao executa rajadas para recuperar. A sequencia
 avanca pelos periodos perdidos. Falha em qualquer ICM descarta a rodada; falha
 BMP ou mag preserva o ultimo cache valido e incrementa contador proprio.
 
-Os contadores de aquisicao ainda nao entram no pacote. Eles serao persistidos em
-`status.txt` na etapa do SD.
+Os contadores de aquisicao nao entram no pacote. Eles sao persistidos
+periodicamente em `status.txt` pelo logger do SD.
 
 ## Volume, captura e arquivos longos
 
@@ -146,13 +146,59 @@ processam arquivos em blocos de 64 KiB. A analise calcula estatisticas sobre
 todos os pacotes, mas limita os graficos a aproximadamente 50000 pontos para
 evitar uso excessivo de memoria em sessoes longas.
 
+## Sessao no cartao SD
+
+O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
+
+```text
+/session.txt
+/S001/imu.bin
+/S001/audio.raw
+/S001/meta.txt
+/S001/status.txt
+```
+
+`imu.bin` contem exatamente a concatenacao dos mesmos pacotes v4 de 79 bytes
+usados no stream USB, sem cabecalho e sem mensagens textuais. O arquivo fica
+aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
+dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. Um
+desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
+
+`meta.txt` e um arquivo ASCII `chave=valor`. Alem de versao, taxas, faixas,
+canais, enderecos e status inicial dos sensores, contem:
+
+```text
+packet_version=4
+packet_size=79
+bmp0_nvm_valid=1
+bmp0_nvm=<42 caracteres hexadecimais>
+bmp1_nvm_valid=1
+bmp1_nvm=<42 caracteres hexadecimais>
+```
+
+Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
+`python/analyze_imu.py` procura automaticamente `meta.txt` na pasta de
+`imu.bin`, aplica a compensacao Bosch em `float` e gera pressao em Pa e
+temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
+cruas e informa `bmp_compensation=unavailable_raw_only`.
+
+`status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
+minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,
+BMPs, USB, fila do SD, bytes escritos, tentativas, falhas e flushes. Tambem
+registra as duracoes maximas de escrita, flush e atualizacao do proprio status,
+em microssegundos, e quantas dessas operacoes levaram pelo menos 10 ms. A
+atualizacao usa `status.tmp` e
+renomeacao; apos perda fisica do cartao, o ultimo status persistido naturalmente
+pode nao conter o evento que impediu a escrita.
+
 ## Graficos
 
 `python/analyze_imu.py` gera:
 
 - `.png`: acelerometro e giroscopio em 2 x 3;
 - `_mag.png`: magnetometros em `uT`;
-- `_bmp_raw.png`: contagens cruas de pressao e temperatura dos BMP390.
+- `_bmp.png`: pressao e temperatura compensadas quando ha NVM em `meta.txt`;
+- `_bmp_raw.png`: contagens cruas quando a NVM nao esta disponivel.
 
 Somente pacotes aprovados por magic e CRC participam da validacao e dos
 graficos.

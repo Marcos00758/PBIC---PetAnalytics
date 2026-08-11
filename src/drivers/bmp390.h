@@ -8,6 +8,8 @@
 
 namespace pet::drivers {
 
+constexpr size_t kBmp390NvmLength = 21;
+
 struct Bmp390RawSample {
   uint32_t pressure;
   uint32_t temperature;
@@ -20,6 +22,7 @@ class Bmp390 {
   bool begin();
   bool startRawSampling25Hz();
   bool readRaw(Bmp390RawSample& sample);
+  bool readNvm(uint8_t (&data)[kBmp390NvmLength]);
 
   bool initialized() const { return initialized_; }
   uint8_t muxChannel() const { return muxChannel_; }

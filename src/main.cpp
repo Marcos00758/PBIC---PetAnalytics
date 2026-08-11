@@ -8,6 +8,7 @@
 #include "drivers/icm20948.h"
 #include "drivers/pca9548a.h"
 #include "services/imu_acquisition.h"
+#include "services/sd_logger.h"
 
 namespace {
 
@@ -24,6 +25,7 @@ pet::services::ImuAcquisition acquisition(
     icm0, icm1, icm2, bmp0, bmp1, pet::config::kImuSamplePeriodUs,
     pet::config::kBmpSamplesPerImuSample,
     pet::config::kMagSamplesPerImuSample);
+pet::services::SdLogger sdLogger;
 
 bool acquisitionReady = false;
 
@@ -108,13 +110,22 @@ bool initializeBmp(pet::drivers::Bmp390& bmp) {
 
 void setup() {
   Serial.begin(pet::config::kSerialBaud);
-  const uint32_t serialWaitStart = millis();
-  while (!Serial &&
-         millis() - serialWaitStart < pet::config::kSerialWaitTimeoutMs) {
-  }
 
   Serial.println();
   Serial.println("PBIC / Pet Analytics - synchronized ICM acquisition");
+  Serial.print("SD pins CS=");
+  Serial.print(pet::pins::kSdChipSelect);
+  Serial.print(" MOSI=");
+  Serial.print(pet::pins::kSdMosi);
+  Serial.print(" MISO=");
+  Serial.print(pet::pins::kSdMiso);
+  Serial.print(" SCK=");
+  Serial.println(pet::pins::kSdSck);
+  const bool sdCardReady = sdLogger.beginCard();
+  Serial.println(sdCardReady
+                     ? "SD read/write diagnostic OK"
+                     : "SD unavailable; recording disabled until reboot");
+
   Serial.print("Wire pins SDA=");
   Serial.print(pet::pins::kI2cSda);
   Serial.print(" SCL=");
@@ -131,9 +142,11 @@ void setup() {
   }
   Serial.println("PCA9548A OK at address 0x70");
 
+  pet::services::SdSessionMetadata sessionMetadata{};
   bool sensorsReady = true;
-  for (pet::drivers::Icm20948* icm : icms) {
-    sensorsReady = initializeSensor(*icm) && sensorsReady;
+  for (size_t i = 0; i < pet::data::kIcmCount; ++i) {
+    sessionMetadata.icmReady[i] = initializeSensor(*icms[i]);
+    sensorsReady = sessionMetadata.icmReady[i] && sensorsReady;
   }
   if (sensorsReady) {
     delay(60);
@@ -142,8 +155,10 @@ void setup() {
     }
   }
   bool bmpsReady = true;
-  for (pet::drivers::Bmp390* bmp : bmps) {
-    bmpsReady = initializeBmp(*bmp) && bmpsReady;
+  for (size_t i = 0; i < pet::data::kBmpCount; ++i) {
+    sessionMetadata.bmpReady[i] = initializeBmp(*bmps[i]);
+    sessionMetadata.bmpAddress[i] = bmps[i]->address();
+    bmpsReady = sessionMetadata.bmpReady[i] && bmpsReady;
   }
   if (bmpsReady) {
     bool rawSamplingReady = true;
@@ -152,18 +167,45 @@ void setup() {
     }
     if (!rawSamplingReady) {
       Serial.println("BMP raw sampling configuration FAILED");
-      return;
+      bmpsReady = false;
+    } else {
+      Serial.println("BMP raw sampling OK rate_hz=25 cached_in_100hz_packets");
     }
-    Serial.println("BMP raw sampling OK rate_hz=25 cached_in_100hz_packets");
+    for (size_t i = 0; i < pet::data::kBmpCount; ++i) {
+      sessionMetadata.bmpNvmValid[i] =
+          bmps[i]->readNvm(sessionMetadata.bmpNvm[i]);
+      Serial.print("BMP390 channel ");
+      Serial.print(bmps[i]->muxChannel());
+      Serial.println(sessionMetadata.bmpNvmValid[i]
+                         ? " NVM calibration read OK (21 bytes)"
+                         : " NVM calibration read FAILED");
+    }
   }
   mux.disableAllChannels();
+
+  if (sdCardReady) {
+    if (sdLogger.beginSession(sessionMetadata, acquisition.counters())) {
+      Serial.print("SD_SESSION_START folder=");
+      Serial.print(sdLogger.sessionFolder());
+      Serial.print(" buffer_bytes=");
+      Serial.print(pet::config::kSdRamBufferBytes);
+      Serial.print(" block_bytes=");
+      Serial.print(pet::config::kSdWriteBlockBytes);
+      Serial.print(" flush_packets=");
+      Serial.println(pet::config::kSdPacketsPerFlush);
+    } else {
+      Serial.println("SD session creation FAILED; recording disabled until reboot");
+    }
+  }
 
   if (!sensorsReady || !bmpsReady) {
     Serial.println("Acquisition disabled because at least one sensor failed.");
     return;
   }
 
-  Serial.print("BINARY_STREAM_START packet_size=");
+  Serial.print(pet::config::kUsbBinaryStreamEnabled
+                   ? "BINARY_STREAM_START packet_size="
+                   : "USB_BINARY_STREAM_DISABLED packet_size=");
   Serial.print(sizeof(pet::data::ImuPacket));
   Serial.print(" packet_version=");
   Serial.print(pet::config::kImuPacketVersion);
@@ -181,6 +223,8 @@ void setup() {
 }
 
 void loop() {
+  sdLogger.updateFailureIndicator();
+
   if (!acquisitionReady) {
     return;
   }
@@ -190,10 +234,15 @@ void loop() {
     return;
   }
 
-  if (Serial && Serial.availableForWrite() >=
-                    static_cast<int>(sizeof(pet::data::ImuPacket))) {
-    Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
-  } else {
-    acquisition.recordUsbDrop();
+  sdLogger.enqueue(packet);
+
+  if (pet::config::kUsbBinaryStreamEnabled) {
+    if (Serial && Serial.availableForWrite() >=
+                      static_cast<int>(sizeof(pet::data::ImuPacket))) {
+      Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+    } else {
+      acquisition.recordUsbDrop();
+    }
   }
+  sdLogger.service(acquisition.counters());
 }
