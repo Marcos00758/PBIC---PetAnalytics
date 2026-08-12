@@ -40,8 +40,9 @@ PCM mono `int16`, 44100 Hz, canal esquerdo. Cada sessao mantem `imu.bin` e
 `audio.raw` abertos simultaneamente, com filas RAM independentes. O arquivo de
 audio nao possui cabecalho; os parametros e o timestamp estimado da primeira
 amostra ficam em `meta.txt`. Antes da sessao, dois segundos em silencio sao
-avaliados em RAM; sinal saturado ou com nivel anormal desabilita somente o
-audio e gera `AUDIO_CAPTURE_REJECTED`.
+avaliados em RAM. Nivel alto, DC ou clipping acima do esperado geram
+`AUDIO_PREFLIGHT_WARNING`, mas o audio continua sendo gravado para preservar o
+dado cru. Somente a ausencia de blocos validos gera `AUDIO_CAPTURE_REJECTED`.
 
 ## Sessões no cartão SD
 

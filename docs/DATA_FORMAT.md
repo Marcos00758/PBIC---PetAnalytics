@@ -239,6 +239,11 @@ Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
 cruas e informa `bmp_compensation=unavailable_raw_only`.
 
+`audio_preflight_accepted=0` significa somente que o ambiente nao atingiu o
+limite esperado de silencio; a captura continua se
+`audio_preflight_valid=1`. Isso preserva o audio cru e permite avaliar o
+preflight posteriormente no Python.
+
 A prealocacao SdFat esta habilitada para os dois fluxos. Sessoes completadas
 sao truncadas para os tamanhos efetivos. Se houver desligamento abrupto, os
 arquivos podem manter a cauda reservada; ela nao deve ser interpretada como

@@ -220,7 +220,7 @@ void setup() {
       Serial.println(preflight.clippingSamples);
     }
     sessionMetadata.audioEnabled =
-        audioStarted && sessionMetadata.audioPreflight.accepted;
+        audioStarted && sessionMetadata.audioPreflight.valid;
     if (sessionMetadata.audioEnabled) {
       audioCapture.prepareForRecording();
     }
@@ -235,6 +235,11 @@ void setup() {
     sessionMetadata.audioStartTimestampValid =
         sessionMetadata.audioStartTimestampUs != 0;
     if (sessionMetadata.audioEnabled) {
+      if (!sessionMetadata.audioPreflight.accepted) {
+        Serial.println(
+            "AUDIO_PREFLIGHT_WARNING reason=quiet_threshold_exceeded "
+            "recording_continues=1");
+      }
       Serial.print("AUDIO_CAPTURE_START format=pcm_s16le sample_rate_hz=");
       Serial.print(pet::config::kMicrophoneSampleRateHz);
       Serial.print(" channels=1 block_samples=");
@@ -243,7 +248,7 @@ void setup() {
       Serial.println(sessionMetadata.audioStartTimestampUs);
     } else {
       Serial.println(
-          "AUDIO_CAPTURE_REJECTED reason=quiet_preflight_failed "
+          "AUDIO_CAPTURE_REJECTED reason=no_valid_preflight_samples "
           "check_i2s_wiring_power_and_microphone reboot_required=1");
       audioCapture.disable();
     }

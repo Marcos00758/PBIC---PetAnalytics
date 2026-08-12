@@ -326,8 +326,10 @@ inverso.
 
 Antes de abrir a sessao, a captura mede dois segundos de sinal em RAM com o
 ambiente em silencio. Media DC, RMS, pico e clipping sao registrados em
-`meta.txt`. Uma leitura invalida ou saturada desconecta o destino de audio,
-mantem a aquisicao dos sensores e emite `AUDIO_CAPTURE_REJECTED`; o firmware
+`meta.txt`. Valores acima dos limites de silencio emitem
+`AUDIO_PREFLIGHT_WARNING`, mas nao bloqueiam a captura: eles podem refletir
+fala ou ruido ambiental no boot e o projeto precisa preservar o sinal cru.
+Somente ausencia de blocos validos emite `AUDIO_CAPTURE_REJECTED`. O firmware
 nao tenta corrigir saturacao com ganho ou filtro digital.
 
 Cada bloco de audio recebe um timestamp apenas na fila RAM. O valor nao altera
