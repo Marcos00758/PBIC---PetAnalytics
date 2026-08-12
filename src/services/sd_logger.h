@@ -20,6 +20,7 @@ struct SdSessionMetadata {
   bool audioEnabled = false;
   bool audioStartTimestampValid = false;
   uint32_t audioStartTimestampUs = 0;
+  AudioPreflightResult audioPreflight{};
 };
 
 struct SdLoggerCounters {
@@ -67,6 +68,11 @@ class SdLogger {
   bool failureConfirmed() const { return failureConfirmed_; }
   uint32_t sessionNumber() const { return sessionNumber_; }
   const char* sessionFolder() const { return sessionFolder_; }
+  uint64_t freeBytesAtBoot() const { return freeBytesAtBoot_; }
+  uint64_t recordingBudgetBytes() const { return recordingBudgetBytes_; }
+  uint32_t estimatedRecordingSeconds() const {
+    return estimatedRecordingSeconds_;
+  }
   const SdLoggerCounters& counters() const { return counters_; }
 
  private:
@@ -83,6 +89,9 @@ class SdLogger {
   void advanceBuffer(size_t count);
   void advanceAudioBuffer(size_t count);
   void checkWriteFailureTimeout();
+  void requestSessionStop(const char* reason);
+  void finishSession(const AcquisitionCounters& acquisitionCounters,
+                     const AudioCaptureCounters& audioCounters);
   void confirmCardFailure(const char* reason);
   void recordOperationDuration(uint32_t durationUs, uint32_t& maximumUs,
                                uint32_t& slowOperations);
@@ -112,6 +121,12 @@ class SdLogger {
   bool failureConfirmed_ = false;
   bool failureIndicatorReady_ = false;
   uint32_t failureConfirmedAtMs_ = 0;
+  uint32_t sessionStartedMs_ = 0;
+  uint64_t freeBytesAtBoot_ = 0;
+  uint64_t recordingBudgetBytes_ = 0;
+  uint32_t estimatedRecordingSeconds_ = 0;
+  bool stopRequested_ = false;
+  const char* stopReason_ = nullptr;
   SdSessionMetadata sessionMetadata_{};
   SdLoggerCounters counters_{};
 };

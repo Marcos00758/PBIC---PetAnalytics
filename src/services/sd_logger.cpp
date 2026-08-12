@@ -15,6 +15,15 @@ constexpr char kSessionPath[] = "/session.txt";
 constexpr char kSessionTempPath[] = "/session.tmp";
 constexpr uint8_t kTestPattern[] = {0x50, 0x42, 0x49, 0x43, 0x53, 0x44};
 
+uint32_t nominalRecordingBytesPerSecond() {
+  uint32_t bytes = sizeof(data::ImuPacket) * config::kImuSampleRateHz;
+  if (config::kMicrophoneRecordingEnabled) {
+    bytes += config::kMicrophoneSampleRateHz * config::kMicrophoneChannels *
+             (config::kMicrophoneBitsPerSample / 8U);
+  }
+  return bytes;
+}
+
 void printHexByte(File& file, uint8_t value) {
   if (value < 0x10) {
     file.print('0');
@@ -46,6 +55,38 @@ bool SdLogger::beginCard() {
                               SD_SCK_MHZ(config::kSdSpiClockMHz));
   if (!SD.sdfs.begin(spiConfig)) {
     confirmCardFailure("initialization");
+    return false;
+  }
+
+  const uint32_t bytesPerCluster = SD.sdfs.bytesPerCluster();
+  const uint32_t clusterCount = SD.sdfs.clusterCount();
+  const uint32_t freeClusterCount = SD.sdfs.freeClusterCount();
+  if (bytesPerCluster == 0 || clusterCount == 0 ||
+      freeClusterCount > clusterCount) {
+    confirmCardFailure("capacity_query");
+    return false;
+  }
+  const uint64_t totalBytes =
+      static_cast<uint64_t>(bytesPerCluster) * clusterCount;
+  freeBytesAtBoot_ =
+      static_cast<uint64_t>(bytesPerCluster) * freeClusterCount;
+  const uint32_t bytesPerSecond = nominalRecordingBytesPerSecond();
+  recordingBudgetBytes_ =
+      freeBytesAtBoot_ > config::kSdFreeSpaceReserveBytes
+          ? freeBytesAtBoot_ - config::kSdFreeSpaceReserveBytes
+          : 0;
+  estimatedRecordingSeconds_ = static_cast<uint32_t>(
+      recordingBudgetBytes_ / bytesPerSecond);
+  Serial.print("SD_CAPACITY total_bytes=");
+  Serial.print(totalBytes);
+  Serial.print(" free_bytes=");
+  Serial.print(freeBytesAtBoot_);
+  Serial.print(" reserve_bytes=");
+  Serial.print(config::kSdFreeSpaceReserveBytes);
+  Serial.print(" estimated_recording_seconds=");
+  Serial.println(estimatedRecordingSeconds_);
+  if (estimatedRecordingSeconds_ < config::kSdMinimumRecordingSeconds) {
+    confirmCardFailure("insufficient_free_space");
     return false;
   }
 
@@ -107,6 +148,9 @@ bool SdLogger::beginSession(
   imuWriteFailureActive_ = false;
   audioWriteFailureActive_ = false;
   counters_ = {};
+  sessionStartedMs_ = millis();
+  stopRequested_ = false;
+  stopReason_ = nullptr;
   sessionActive_ = true;
 
   const uint32_t statusStartedUs = micros();
@@ -123,7 +167,7 @@ bool SdLogger::beginSession(
 }
 
 bool SdLogger::enqueue(const data::ImuPacket& packet) {
-  if (!sessionActive_) {
+  if (!sessionActive_ || stopRequested_) {
     return false;
   }
   if (sizeof(packet) > config::kSdRamBufferBytes - bufferedBytes_) {
@@ -142,7 +186,7 @@ bool SdLogger::enqueue(const data::ImuPacket& packet) {
 }
 
 bool SdLogger::canEnqueueAudioBlock() const {
-  return sessionActive_ && sessionMetadata_.audioEnabled &&
+  return sessionActive_ && !stopRequested_ && sessionMetadata_.audioEnabled &&
          sizeof(AudioPcmBlock) <=
              config::kSdAudioRamBufferBytes - audioBufferedBytes_;
 }
@@ -177,25 +221,43 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
       counters_.packetsQueued - packetsAtLastFlush_ >=
       config::kSdPacketsPerFlush;
   const uint32_t nowMs = millis();
+  if (!stopRequested_) {
+    const uint64_t committedAndBuffered =
+        static_cast<uint64_t>(counters_.bytesWritten) +
+        counters_.audioBytesWritten + bufferedBytes_ + audioBufferedBytes_;
+    if (committedAndBuffered >= recordingBudgetBytes_) {
+      requestSessionStop("stopped_free_space_reserve");
+    } else if (nowMs - sessionStartedMs_ >=
+               config::kSdMaximumSessionSeconds * 1000UL) {
+      requestSessionStop("stopped_duration_limit");
+    }
+  }
+  const bool drainDue = flushDue || stopRequested_;
   if (static_cast<int32_t>(nowMs - nextWriteRetryMs_) >= 0) {
     const bool imuReady =
         bufferedBytes_ >= config::kSdImuWriteBlockBytes ||
-        (flushDue && bufferedBytes_ > 0);
+        (drainDue && bufferedBytes_ > 0);
     const bool audioReady =
         audioBufferedBytes_ >= config::kSdAudioWriteBlockBytes ||
-        (flushDue && audioBufferedBytes_ > 0);
+        (drainDue && audioBufferedBytes_ > 0);
     const bool imuMoreFull =
         static_cast<uint64_t>(bufferedBytes_) *
             config::kSdAudioRamBufferBytes >=
         static_cast<uint64_t>(audioBufferedBytes_) * config::kSdRamBufferBytes;
 
     if (imuReady && (!audioReady || imuMoreFull)) {
-      writeBufferedBytes(flushDue &&
+      writeBufferedBytes(drainDue &&
                          bufferedBytes_ < config::kSdImuWriteBlockBytes);
     } else if (audioReady) {
       writeAudioBufferedBytes(
-          flushDue && audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
+          drainDue && audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
     }
+  }
+
+  if (stopRequested_ && bufferedBytes_ == 0 && audioBufferedBytes_ == 0 &&
+      sessionActive_) {
+    finishSession(acquisitionCounters, audioCounters);
+    return;
   }
 
   if (flushDue && bufferedBytes_ == 0 && audioBufferedBytes_ == 0 &&
@@ -324,6 +386,14 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(config::kSdImuWriteBlockBytes);
   file.print("sd_audio_write_block_bytes=");
   file.println(config::kSdAudioWriteBlockBytes);
+  file.print("sd_free_bytes_at_boot=");
+  file.println(freeBytesAtBoot_);
+  file.print("sd_recording_budget_bytes=");
+  file.println(recordingBudgetBytes_);
+  file.print("sd_estimated_recording_seconds=");
+  file.println(estimatedRecordingSeconds_);
+  file.print("sd_maximum_session_seconds=");
+  file.println(config::kSdMaximumSessionSeconds);
   file.print("packet_version=");
   file.println(config::kImuPacketVersion);
   file.print("packet_size=");
@@ -368,6 +438,20 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(metadata.audioStartTimestampValid ? 1 : 0);
   file.print("audio_start_timestamp_us=");
   file.println(metadata.audioStartTimestampUs);
+  file.print("audio_preflight_valid=");
+  file.println(metadata.audioPreflight.valid ? 1 : 0);
+  file.print("audio_preflight_accepted=");
+  file.println(metadata.audioPreflight.accepted ? 1 : 0);
+  file.print("audio_preflight_samples=");
+  file.println(metadata.audioPreflight.samples);
+  file.print("audio_preflight_mean_counts=");
+  file.println(metadata.audioPreflight.meanCounts);
+  file.print("audio_preflight_rms_counts=");
+  file.println(metadata.audioPreflight.rmsCounts);
+  file.print("audio_preflight_peak_counts=");
+  file.println(metadata.audioPreflight.peakCounts);
+  file.print("audio_preflight_clipping_samples=");
+  file.println(metadata.audioPreflight.clippingSamples);
   file.println("audio_timestamp_reference=estimated_first_sample_dma_block");
   file.print("audio_timestamp_uncertainty_us=");
   file.println((config::kMicrophoneBlockSamples * 1000000UL +
@@ -670,6 +754,55 @@ void SdLogger::checkWriteFailureTimeout() {
       nowMs - audioWriteFailureStartedMs_ >= config::kSdHealthWindowMs) {
     confirmCardFailure("audio_write_health_window");
   }
+}
+
+void SdLogger::requestSessionStop(const char* reason) {
+  if (stopRequested_ || !sessionActive_) {
+    return;
+  }
+  stopRequested_ = true;
+  stopReason_ = reason;
+  Serial.print("SD_SESSION_STOP_REQUESTED reason=");
+  Serial.print(reason);
+  Serial.print(" imu_buffered_bytes=");
+  Serial.print(bufferedBytes_);
+  Serial.print(" audio_buffered_bytes=");
+  Serial.println(audioBufferedBytes_);
+}
+
+void SdLogger::finishSession(
+    const AcquisitionCounters& acquisitionCounters,
+    const AudioCaptureCounters& audioCounters) {
+  const uint32_t imuFlushStartedUs = micros();
+  imuFile_.flush();
+  recordOperationDuration(micros() - imuFlushStartedUs,
+                          counters_.maxFlushDurationUs,
+                          counters_.slowFlushes);
+  ++counters_.flushes;
+  if (sessionMetadata_.audioEnabled) {
+    const uint32_t audioFlushStartedUs = micros();
+    audioFile_.flush();
+    recordOperationDuration(micros() - audioFlushStartedUs,
+                            counters_.maxAudioFlushDurationUs,
+                            counters_.slowAudioFlushes);
+    ++counters_.audioFlushes;
+  }
+  const char* finalState = stopReason_ != nullptr ? stopReason_ : "stopped";
+  if (!writeStatus(acquisitionCounters, audioCounters, finalState)) {
+    confirmCardFailure("final_status");
+    return;
+  }
+  imuFile_.close();
+  if (audioFile_) {
+    audioFile_.close();
+  }
+  sessionActive_ = false;
+  Serial.print("SD_SESSION_STOPPED reason=");
+  Serial.print(finalState);
+  Serial.print(" imu_bytes=");
+  Serial.print(counters_.bytesWritten);
+  Serial.print(" audio_bytes=");
+  Serial.println(counters_.audioBytesWritten);
 }
 
 void SdLogger::confirmCardFailure(const char* reason) {

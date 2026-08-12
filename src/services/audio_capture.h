@@ -19,6 +19,16 @@ struct AudioCaptureCounters {
   uint16_t queueHighWaterBlocks = 0;
 };
 
+struct AudioPreflightResult {
+  bool valid = false;
+  bool accepted = false;
+  uint32_t samples = 0;
+  int32_t meanCounts = 0;
+  uint32_t rmsCounts = 0;
+  uint16_t peakCounts = 0;
+  uint32_t clippingSamples = 0;
+};
+
 class AudioCaptureSink : public AudioStream {
  public:
   AudioCaptureSink();
@@ -26,6 +36,7 @@ class AudioCaptureSink : public AudioStream {
   bool pop(AudioPcmBlock& block);
   AudioCaptureCounters counters() const;
   uint32_t firstSampleTimestampUs() const;
+  void prepareForRecording();
   virtual void update() override;
 
  private:
@@ -43,6 +54,9 @@ class AudioCaptureSink : public AudioStream {
 class AudioCapture {
  public:
   bool begin();
+  AudioPreflightResult runQuietPreflight(uint32_t durationMs);
+  void prepareForRecording();
+  void disable();
   bool pop(AudioPcmBlock& block);
   AudioCaptureCounters counters() const;
   uint32_t firstSampleTimestampUs() const;

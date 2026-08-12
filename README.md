@@ -39,7 +39,9 @@ O ICS43434 e capturado pelo DMA da biblioteca `Audio` oficial da Teensy em
 PCM mono `int16`, 44100 Hz, canal esquerdo. Cada sessao mantem `imu.bin` e
 `audio.raw` abertos simultaneamente, com filas RAM independentes. O arquivo de
 audio nao possui cabecalho; os parametros e o timestamp estimado da primeira
-amostra ficam em `meta.txt`.
+amostra ficam em `meta.txt`. Antes da sessao, dois segundos em silencio sao
+avaliados em RAM; sinal saturado ou com nivel anormal desabilita somente o
+audio e gera `AUDIO_CAPTURE_REJECTED`.
 
 ## Sessões no cartão SD
 
@@ -55,13 +57,16 @@ pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
 e só é controlado depois que o SPI foi encerrado com segurança.
 
 Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz,
-`imu.bin` usa blocos de 512 bytes e `audio.raw` usa blocos de 4096 bytes.
+`imu.bin` e `audio.raw` usam blocos de 512 bytes. No boot o firmware informa o
+espaco livre e a duracao estimada. Ele preserva 4 MiB de reserva e encerra a
+sessao de modo controlado ao atingir essa reserva ou 30 minutos. Uma sessao de
+30 minutos com IMU e audio requer aproximadamente 173 MB livres.
 
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
 
 ```powershell
-python python/parse_data.py E:/S001/imu.bin
-python python/analyze_imu.py E:/S001/imu.bin --no-show
+python python/parse_data.py D:/S001/imu.bin
+python python/analyze_imu.py D:/S001/imu.bin --no-show
 ```
 
 Quando `meta.txt` acompanha `imu.bin`, o analisador aplica automaticamente a

@@ -162,15 +162,22 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 usados no stream USB, sem cabecalho e sem mensagens textuais. O arquivo fica
 aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
 dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. O
-audio possui fila separada de 32768 bytes e e escrito em blocos de ate 4096
+audio possui fila separada de 32768 bytes e e escrito em blocos de ate 512
 bytes. Em cada passagem do loop ocorre no maximo uma escrita ao SD. Um
 desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
 
 `audio.raw` contem PCM mono assinado de 16 bits, little-endian, sem cabecalho,
 capturado do canal esquerdo do ICS43434 a 44100 Hz. Cada amostra ocupa dois
 bytes e o volume nominal e 88200 bytes/s, aproximadamente 158,76 MB em 30
-minutos. O arquivo fica aberto junto de `imu.bin`. A fila DMA/RAM de captura e
+minutos. Somado aos pacotes IMU, o volume nominal da sessao e aproximadamente
+173 MB em 30 minutos. O arquivo fica aberto junto de `imu.bin`. A fila DMA/RAM de captura e
 a fila do SD sao independentes das filas dos pacotes IMU.
+
+O volume e consultado uma vez no boot. O logger mantem 4 MiB fora do orcamento
+de gravacao, recusa iniciar com menos de 60 segundos estimados e encerra a
+sessao de forma controlada ao atingir a reserva ou 30 minutos. As mensagens
+`SD_SESSION_STOP_REQUESTED` e `SD_SESSION_STOPPED` indicam esse encerramento;
+ele nao e tratado como falha do cartao.
 
 O timestamp inicial do audio usa a mesma origem `micros()` dos pacotes IMU. Ele
 e estimado no recebimento do primeiro bloco DMA, subtraindo a duracao de 128
@@ -190,7 +197,11 @@ packet_version=4
 packet_size=79
 sd_spi_clock_mhz=12
 sd_imu_write_block_bytes=512
-sd_audio_write_block_bytes=4096
+sd_audio_write_block_bytes=512
+sd_free_bytes_at_boot=<bytes livres medidos>
+sd_recording_budget_bytes=<bytes livres menos 4 MiB>
+sd_estimated_recording_seconds=<estimativa nominal>
+sd_maximum_session_seconds=1800
 audio_enabled=1
 audio_file=audio.raw
 audio_format=pcm_s16le
@@ -201,6 +212,13 @@ audio_bits_per_sample=16
 audio_block_samples=128
 audio_start_timestamp_valid=1
 audio_start_timestamp_us=<micros estimado da primeira amostra>
+audio_preflight_valid=1
+audio_preflight_accepted=1
+audio_preflight_samples=<amostras avaliadas em RAM>
+audio_preflight_mean_counts=<media DC>
+audio_preflight_rms_counts=<RMS sem DC>
+audio_preflight_peak_counts=<pico absoluto>
+audio_preflight_clipping_samples=<amostras proximas da escala completa>
 bmp0_nvm_valid=1
 bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1

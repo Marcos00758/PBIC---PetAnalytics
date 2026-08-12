@@ -150,7 +150,7 @@ durante a sessão.
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
 escreve `imu.bin` em blocos de até 512 bytes, faz flush a cada 1000 pacotes e
 atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O áudio usa blocos
-de até 4096 bytes para reduzir a quantidade de chamadas ao cartão. Em cada
+de até 512 bytes para limitar a duração de cada chamada ao cartão. Em cada
 passagem do loop ocorre no máximo uma escrita; quando as duas filas estão
 prontas, o logger escolhe a proporcionalmente mais cheia. O SPI do SD opera a
 12 MHz nesta configuração de robustez.
@@ -319,10 +319,16 @@ O loop transfere os blocos para uma segunda fila de 32768 bytes pertencente ao
 `sd_logger`. A fila de captura tem 127 posicoes uteis, tambem cerca de 32 KiB;
 juntas oferecem aproximadamente 0,74 s de reserva a 44100 Hz. O logger mantem
 `imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve o audio em blocos de
-ate 4096 bytes. Flush, escrita e falha do audio possuem contadores e latencias
+ate 512 bytes. Flush, escrita e falha do audio possuem contadores e latencias
 separados em `status.txt`. A janela de saude acompanha sucesso de cada arquivo
 separadamente, evitando que `imu.bin` mascare uma falha de `audio.raw` ou o
 inverso.
+
+Antes de abrir a sessao, a captura mede dois segundos de sinal em RAM com o
+ambiente em silencio. Media DC, RMS, pico e clipping sao registrados em
+`meta.txt`. Uma leitura invalida ou saturada desconecta o destino de audio,
+mantem a aquisicao dos sensores e emite `AUDIO_CAPTURE_REJECTED`; o firmware
+nao tenta corrigir saturacao com ganho ou filtro digital.
 
 O primeiro timestamp de audio e estimado pelo instante de entrega do primeiro
 bloco DMA menos a duracao desse bloco. `meta.txt` registra formato, taxa,
@@ -336,3 +342,10 @@ com `-13,3 dBFS` RMS e picos em escala completa. Como a saturacao ja existia
 nos primeiros segundos, ela nao foi causada pela falha posterior do SD. O
 firmware nao aplica ganho digital; alimentacao, GND, DOUT e sincronismo de boot
 do breakout ainda precisam ser validados antes de aceitar uma sessao de audio.
+
+O S017 confirmou uma segunda causa independente: o volume terminou com apenas
+1024 bytes livres. O logger agora mede os clusters no boot, reserva 4 MiB para
+fechamento seguro e calcula o orcamento da sessao a partir do espaco livre. A
+sessao para de aceitar dados e drena os buffers ao atingir a reserva ou o limite
+de 30 minutos; falta de espaco no boot e reportada como
+`insufficient_free_space`.

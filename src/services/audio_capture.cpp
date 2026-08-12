@@ -1,5 +1,6 @@
 #include "services/audio_capture.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "config/pins.h"
@@ -60,6 +61,17 @@ uint32_t AudioCaptureSink::firstSampleTimestampUs() const {
   return timestamp;
 }
 
+void AudioCaptureSink::prepareForRecording() {
+  __disable_irq();
+  tail_ = head_;
+  firstSampleTimestampUs_ = 0;
+  queueHighWaterBlocks_ = 0;
+  blocksReceived_ = 0;
+  blocksDropped_ = 0;
+  incompleteBlocks_ = 0;
+  __enable_irq();
+}
+
 void AudioCaptureSink::update() {
   audio_block_t* left = receiveReadOnly(0);
   if (left == nullptr) {
@@ -102,6 +114,77 @@ bool AudioCapture::begin() {
   leftConnection_ = &leftConnection;
   started_ = true;
   return true;
+}
+
+AudioPreflightResult AudioCapture::runQuietPreflight(uint32_t durationMs) {
+  AudioPreflightResult result{};
+  if (!started_) {
+    return result;
+  }
+
+  int64_t sum = 0;
+  uint64_t sumSquares = 0;
+  uint32_t peak = 0;
+  const uint32_t startedMs = millis();
+  AudioPcmBlock block{};
+  while (millis() - startedMs < durationMs) {
+    if (!pop(block)) {
+      yield();
+      continue;
+    }
+    for (int16_t sample : block.samples) {
+      const int32_t value = sample;
+      const uint32_t absolute =
+          value < 0 ? static_cast<uint32_t>(-value)
+                    : static_cast<uint32_t>(value);
+      sum += value;
+      sumSquares += static_cast<uint64_t>(value * value);
+      if (absolute > peak) {
+        peak = absolute;
+      }
+      if (absolute >= 32760U) {
+        ++result.clippingSamples;
+      }
+      ++result.samples;
+    }
+  }
+
+  if (result.samples == 0) {
+    return result;
+  }
+  result.valid = true;
+  result.meanCounts = static_cast<int32_t>(sum / result.samples);
+  const double mean = static_cast<double>(sum) / result.samples;
+  double variance = static_cast<double>(sumSquares) / result.samples -
+                    mean * mean;
+  if (variance < 0.0) {
+    variance = 0.0;
+  }
+  result.rmsCounts = static_cast<uint32_t>(sqrt(variance) + 0.5);
+  result.peakCounts = static_cast<uint16_t>(peak > 32767U ? 32767U : peak);
+  const uint64_t clippingPpm =
+      static_cast<uint64_t>(result.clippingSamples) * 1000000ULL /
+      result.samples;
+  const int32_t absoluteMean =
+      result.meanCounts < 0 ? -result.meanCounts : result.meanCounts;
+  result.accepted =
+      absoluteMean <= config::kAudioPreflightMaximumAbsMeanCounts &&
+      result.rmsCounts <= config::kAudioPreflightMaximumRmsCounts &&
+      clippingPpm <= config::kAudioPreflightMaximumClippingPpm;
+  return result;
+}
+
+void AudioCapture::prepareForRecording() {
+  if (started_) {
+    sink_.prepareForRecording();
+  }
+}
+
+void AudioCapture::disable() {
+  if (leftConnection_ != nullptr) {
+    leftConnection_->disconnect();
+  }
+  started_ = false;
 }
 
 bool AudioCapture::pop(AudioPcmBlock& block) {

@@ -196,7 +196,34 @@ void setup() {
 
   if (pet::config::kMicrophoneRecordingEnabled && sdCardReady && sensorsReady &&
       bmpsReady) {
-    sessionMetadata.audioEnabled = audioCapture.begin();
+    const bool audioStarted = audioCapture.begin();
+    if (audioStarted) {
+      Serial.print("AUDIO_PREFLIGHT_START quiet_duration_ms=");
+      Serial.println(pet::config::kAudioPreflightDurationMs);
+      sessionMetadata.audioPreflight = audioCapture.runQuietPreflight(
+          pet::config::kAudioPreflightDurationMs);
+      const pet::services::AudioPreflightResult& preflight =
+          sessionMetadata.audioPreflight;
+      Serial.print("AUDIO_PREFLIGHT_RESULT valid=");
+      Serial.print(preflight.valid ? 1 : 0);
+      Serial.print(" accepted=");
+      Serial.print(preflight.accepted ? 1 : 0);
+      Serial.print(" samples=");
+      Serial.print(preflight.samples);
+      Serial.print(" mean_counts=");
+      Serial.print(preflight.meanCounts);
+      Serial.print(" rms_counts=");
+      Serial.print(preflight.rmsCounts);
+      Serial.print(" peak_counts=");
+      Serial.print(preflight.peakCounts);
+      Serial.print(" clipping_samples=");
+      Serial.println(preflight.clippingSamples);
+    }
+    sessionMetadata.audioEnabled =
+        audioStarted && sessionMetadata.audioPreflight.accepted;
+    if (sessionMetadata.audioEnabled) {
+      audioCapture.prepareForRecording();
+    }
     const uint32_t timestampDeadlineMs = millis() + 50U;
     while (sessionMetadata.audioEnabled &&
            audioCapture.firstSampleTimestampUs() == 0 &&
@@ -207,12 +234,19 @@ void setup() {
         audioCapture.firstSampleTimestampUs();
     sessionMetadata.audioStartTimestampValid =
         sessionMetadata.audioStartTimestampUs != 0;
-    Serial.print("AUDIO_CAPTURE_START format=pcm_s16le sample_rate_hz=");
-    Serial.print(pet::config::kMicrophoneSampleRateHz);
-    Serial.print(" channels=1 block_samples=");
-    Serial.print(pet::config::kMicrophoneBlockSamples);
-    Serial.print(" first_sample_timestamp_us=");
-    Serial.println(sessionMetadata.audioStartTimestampUs);
+    if (sessionMetadata.audioEnabled) {
+      Serial.print("AUDIO_CAPTURE_START format=pcm_s16le sample_rate_hz=");
+      Serial.print(pet::config::kMicrophoneSampleRateHz);
+      Serial.print(" channels=1 block_samples=");
+      Serial.print(pet::config::kMicrophoneBlockSamples);
+      Serial.print(" first_sample_timestamp_us=");
+      Serial.println(sessionMetadata.audioStartTimestampUs);
+    } else {
+      Serial.println(
+          "AUDIO_CAPTURE_REJECTED reason=quiet_preflight_failed "
+          "check_i2s_wiring_power_and_microphone reboot_required=1");
+      audioCapture.disable();
+    }
   }
 
   if (sdCardReady) {
