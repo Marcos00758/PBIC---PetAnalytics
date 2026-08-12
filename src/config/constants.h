@@ -17,7 +17,7 @@ constexpr uint8_t kMicrophoneChannels = 1;
 constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.4.0";
+constexpr char kFirmwareVersion[] = "0.4.1";
 
 constexpr size_t kSdRamBufferBytes = 8192;
 constexpr size_t kSdAudioRamBufferBytes = 32768;

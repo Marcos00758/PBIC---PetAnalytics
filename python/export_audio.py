@@ -59,12 +59,16 @@ def export_audio(
 
     rms = math.sqrt(sum_squares / samples) if samples else 0.0
     rms_dbfs = 20.0 * math.log10(rms / 32768.0) if rms else -120.0
+    safe_gain_db = (
+        20.0 * math.log10(32767.0 / input_peak) if input_peak else 120.0
+    )
     return {
         "valid_bytes": valid_bytes - remaining,
         "samples": samples,
         "duration_s": samples / sample_rate if sample_rate else 0.0,
         "input_peak": input_peak,
         "input_rms_dbfs": rms_dbfs,
+        "peak_safe_gain_db": safe_gain_db,
         "gain_db": gain_db,
         "output_clipped_samples": output_clipped,
     }
@@ -90,6 +94,11 @@ def main() -> None:
             print(f"{key}={value:.3f}")
         else:
             print(f"{key}={value}")
+    if stats["output_clipped_samples"]:
+        print(
+            "warning=output_clipped; reduce --gain-db to no more than "
+            f"{stats['peak_safe_gain_db']:.3f} dB"
+        )
     print(f"wav_file={output.resolve()}")
 
 

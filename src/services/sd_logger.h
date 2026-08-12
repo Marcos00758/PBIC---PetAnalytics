@@ -60,6 +60,10 @@ class SdLogger {
   bool beginSession(const SdSessionMetadata& metadata,
                     const AcquisitionCounters& acquisitionCounters,
                     const AudioCaptureCounters& audioCounters);
+  bool finalizeInitialSessionSetup(
+      const SdSessionMetadata& metadata,
+      const AcquisitionCounters& acquisitionCounters,
+      const AudioCaptureCounters& audioCounters);
   bool enqueue(const data::ImuPacket& packet);
   bool enqueueAudio(const AudioPcmBlock& block);
   bool canEnqueueAudioBlock() const;

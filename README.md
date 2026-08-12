@@ -150,3 +150,6 @@ ffplay -f s16le -ar 44100 -ch_layout mono "E:/S001/audio.raw"
 
 Para audio de baixo nivel, prefira `python/export_audio.py --gain-db 18`.
 O ganho afeta somente o WAV de reproducao; `audio.raw` permanece inalterado.
+O exportador informa `peak_safe_gain_db` e avisa quando o ganho escolhido
+produz clipping; nao se deve amplificar uma captura que ja esteja proxima da
+escala completa.

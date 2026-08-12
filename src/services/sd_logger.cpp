@@ -187,6 +187,40 @@ bool SdLogger::beginSession(
   return true;
 }
 
+bool SdLogger::finalizeInitialSessionSetup(
+    const SdSessionMetadata& metadata,
+    const AcquisitionCounters& acquisitionCounters,
+    const AudioCaptureCounters& audioCounters) {
+  if (!sessionActive_) {
+    return false;
+  }
+
+  sessionMetadata_ = metadata;
+  sessionStartedMs_ = millis();
+  audioFirstTimestampUs_ = metadata.audioStartTimestampUs;
+  audioFirstTimestampValid_ = metadata.audioStartTimestampValid;
+  if (!metadata.audioEnabled) {
+    if (audioFile_ && !audioFile_.truncate(0)) {
+      confirmCardFailure("disabled_audio_truncate");
+      return false;
+    }
+    audioPreallocatedBytes_ = 0;
+  }
+  if (!writeMetadata(metadata)) {
+    confirmCardFailure("final_metadata");
+    return false;
+  }
+  if (!writeStatus(acquisitionCounters, audioCounters, "recording")) {
+    confirmCardFailure("final_initial_status");
+    return false;
+  }
+  if (!writeJournal("recording")) {
+    confirmCardFailure("final_initial_journal");
+    return false;
+  }
+  return true;
+}
+
 bool SdLogger::enqueue(const data::ImuPacket& packet) {
   if (!sessionActive_ || stopRequested_) {
     return false;
@@ -261,12 +295,7 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
     const bool audioReady =
         audioBufferedBytes_ >= config::kSdAudioWriteBlockBytes ||
         (drainDue && audioBufferedBytes_ > 0);
-    const bool imuMoreFull =
-        static_cast<uint64_t>(bufferedBytes_) *
-            config::kSdAudioRamBufferBytes >=
-        static_cast<uint64_t>(audioBufferedBytes_) * config::kSdRamBufferBytes;
-
-    if (imuReady && (!audioReady || imuMoreFull)) {
+    if (imuReady) {
       writeBufferedBytes(drainDue &&
                          bufferedBytes_ < config::kSdImuWriteBlockBytes);
     } else if (audioReady) {

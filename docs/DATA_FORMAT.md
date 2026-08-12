@@ -267,7 +267,9 @@ O primeiro checkpoint util ocorre apos aproximadamente dez segundos e os
 seguintes a cada 30 segundos. `python/parse_data.py` e
 `python/analyze_imu.py` aplicam `imu_valid_bytes` automaticamente.
 `python/export_audio.py` usa `audio_valid_bytes` e gera um WAV sem a cauda.
-O ganho opcional do WAV nao modifica o arquivo cientifico cru.
+O ganho opcional do WAV nao modifica o arquivo cientifico cru. A ferramenta
+informa `peak_safe_gain_db` e `output_clipped_samples`; ganho acima do limite
+seguro nao recupera uma captura ja saturada.
 
 `status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
 minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,

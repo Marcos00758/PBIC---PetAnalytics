@@ -345,6 +345,11 @@ filas, faz flush, trunca os arquivos, marca o journal como
 proxima pasta pode causar um pico isolado; sua duracao e registrada em
 `sd_preallocation_duration_us`.
 
+No primeiro boot, a prealocacao ocorre antes de ativar o I2S. Assim, o
+preflight mede o microfone depois do maior pico inicial de atividade do SD. O
+logger tambem atende primeiro qualquer bloco pendente de `imu.bin`; o audio usa
+o restante da banda e continua protegido por sua fila RAM independente.
+
 O journal e escrito apos o primeiro flush, por volta de dez segundos, e depois
 a cada 3000 pacotes, aproximadamente 30 segundos. Uma sessao interrompida pode
 manter a cauda fisica prealocada, mas `parse_data.py`, `analyze_imu.py` e
@@ -361,3 +366,11 @@ O S017 confirmou uma segunda causa independente: o volume terminou com apenas
 1024 bytes livres. O logger mede os clusters no boot e reserva 4 MiB. Antes de
 cada rotacao, verifica se ha espaco para a proxima prealocacao completa; falta
 de espaco e reportada antes de iniciar novos fluxos.
+
+No teste S007, o preflight anterior a prealocacao estava limpo, mas a gravacao
+degradou de aproximadamente `-65 dBFS` no primeiro meio segundo para ruido com
+DC e clipping durante a atividade do SD. A sessao tambem descartou 18764
+pacotes IMU porque ambas as filas ficaram cheias. A versao 0.4.1 altera a ordem
+de boot e a prioridade das filas; se o novo preflight ou a gravacao continuarem
+ruidosos, a causa restante e eletrica entre SD e I2S e exige validacao de
+alimentacao, GND e roteamento dos fios.

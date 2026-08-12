@@ -194,8 +194,20 @@ void setup() {
   }
   mux.disableAllChannels();
 
-  if (pet::config::kMicrophoneRecordingEnabled && sdCardReady && sensorsReady &&
-      bmpsReady) {
+  const bool audioRequested = pet::config::kMicrophoneRecordingEnabled &&
+                              sdCardReady && sensorsReady && bmpsReady;
+  sessionMetadata.audioEnabled = audioRequested;
+  bool sdSessionReady = false;
+  if (sdCardReady) {
+    sdSessionReady = sdLogger.beginSession(
+        sessionMetadata, acquisition.counters(), audioCapture.counters());
+    if (!sdSessionReady) {
+      Serial.println(
+          "SD session creation FAILED; recording disabled until reboot");
+    }
+  }
+
+  if (audioRequested && sdSessionReady) {
     const bool audioStarted = audioCapture.begin();
     if (audioStarted) {
       Serial.print("AUDIO_PREFLIGHT_START quiet_duration_ms=");
@@ -254,9 +266,10 @@ void setup() {
     }
   }
 
-  if (sdCardReady) {
-    if (sdLogger.beginSession(sessionMetadata, acquisition.counters(),
-                              audioCapture.counters())) {
+  if (sdSessionReady) {
+    sdSessionReady = sdLogger.finalizeInitialSessionSetup(
+        sessionMetadata, acquisition.counters(), audioCapture.counters());
+    if (sdSessionReady) {
       Serial.print("SD_SESSION_START folder=");
       Serial.print(sdLogger.sessionFolder());
       Serial.print(" buffer_bytes=");
@@ -276,7 +289,8 @@ void setup() {
       Serial.print(" journal_packets=");
       Serial.println(pet::config::kSdPacketsPerJournalUpdate);
     } else {
-      Serial.println("SD session creation FAILED; recording disabled until reboot");
+      Serial.println(
+          "SD session finalization FAILED; recording disabled until reboot");
     }
   }
 
