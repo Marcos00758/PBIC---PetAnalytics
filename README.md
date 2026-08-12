@@ -132,12 +132,14 @@ python python/calibrate_magnetometer.py data/rotacao_3d.bin
 
 ### Teste isolado microfone + SD
 
-`kAudioSdDiagnosticEnabled=true` ativa temporariamente um teste de cinco
+`kAudioSdDiagnosticEnabled=true` ativa temporariamente um teste de dez
 minutos que inicializa somente o ICS43434 e o cartao SD. Nesse modo, o firmware
 nao inicializa `Wire`, PCA9548A, ICM-20948 ou BMP390 e nao cria pastas `/Sxxx`.
 Ele cria uma unica pasta `/Mxxx`, prealoca `audio.raw` antes de iniciar o I2S e
-nao faz rotacao automatica. Ao fim, desliga a captura, drena o buffer, trunca o
-arquivo e emite `MIC_SD_TEST_COMPLETED`.
+nao faz rotacao automatica. Os primeiros cinco minutos usam escritas de 1024
+bytes e os cinco seguintes usam 2048 bytes, sem interrupcao ou nova
+prealocacao entre as fases. Ao fim, desliga a captura, drena o buffer, trunca
+o arquivo e emite `MIC_SD_TEST_COMPLETED`.
 
 Carregue e monitore:
 
@@ -151,13 +153,15 @@ letra atribuida pelo Windows:
 ```powershell
 Get-Content E:/M001/status.txt
 Get-Content E:/M001/journal.txt
+python python/analyze_sd_blocks.py E:/M001
 python python/export_audio.py E:/M001
 ffplay data/M001_audio.wav
 ```
 
-O resultado esperado e aproximadamente 300 segundos, zero falhas de escrita e,
-idealmente, zero blocos perdidos ou preenchidos com silencio. Para voltar ao
-firmware completo depois do teste, altere somente
+O resultado esperado e aproximadamente 600 segundos, zero falhas de escrita e,
+idealmente, zero blocos perdidos ou preenchidos com silencio. O analisador
+mostra histogramas de latencia separados e uma recomendacao provisoria do
+menor bloco aceitavel. Para voltar ao firmware completo depois do teste, altere somente
 `kAudioSdDiagnosticEnabled=false`.
 
 `kMicrophoneDiagnosticEnabled=true` inicia somente o

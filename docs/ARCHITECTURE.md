@@ -398,14 +398,24 @@ alimentacao, GND e roteamento dos fios.
 O servico `src/services/audio_sd_diagnostic` existe para separar o caminho
 ICS43434/DMA/SD da aquisicao I2C. Com `kAudioSdDiagnosticEnabled=true`, `main`
 retorna antes de inicializar `Wire`, PCA9548A, ICM-20948 e BMP390. O teste cria
-uma pasta `/Mxxx`, prealoca uma unica janela de cinco minutos e nao rotaciona
+uma pasta `/Mxxx`, prealoca uma unica janela de dez minutos e nao rotaciona
 arquivos. Assim, nenhuma prealocacao ocorre durante a captura.
 
-O caminho isolado preserva PCM16 mono a 44100 Hz, blocos SD de 512 bytes,
-sequencia DMA e zero-fill de gaps. Faz `sync()` a cada dez segundos e atualiza
-o journal a cada trinta segundos. No limite de cinco minutos, desliga a origem
-I2S, drena a fila, sincroniza, trunca e grava o status final. Esse modo e
-temporario e mutuamente exclusivo com o diagnostico I2S somente em RAM.
+O caminho isolado preserva PCM16 mono a 44100 Hz, sequencia DMA e zero-fill de
+gaps. A mesma captura continua por duas fases de cinco minutos: 1024 bytes por
+escrita na primeira e 2048 bytes na segunda. Nao ha flush, reinicio de I2S ou
+prealocacao na transicao. Faz `sync()` a cada dez segundos e atualiza o journal
+a cada trinta segundos. No limite de dez minutos, desliga a origem I2S, drena a
+fila, sincroniza, trunca e grava o status final. Esse modo e temporario e
+mutuamente exclusivo com o diagnostico I2S somente em RAM.
+
+Cada fase possui contadores proprios de escritas, falhas, gaps, silencio
+inserido, ocupacao do buffer e histograma de latencia nas faixas `<1`, `1-2`,
+`2-5`, `5-10`, `10-20`, `20-50`, `50-100` e `>=100 ms`. O script
+`python/analyze_sd_blocks.py` compara as fases e indica provisoriamente o menor
+bloco sem falhas, gaps ou escritas de pelo menos 100 ms. O resultado em
+hardware decide o bloco do logger integrado; 4096 bytes nao participa deste
+ensaio devido aos bloqueios proximos de 300 ms ja observados.
 
 S012 demonstrou que a continuidade de audio foi preservada por zero-fill:
 300,008 s, 76 blocos perdidos em 50 eventos e maior gap de quatro blocos. No

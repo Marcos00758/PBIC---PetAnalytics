@@ -336,14 +336,19 @@ misturar o ensaio com as sessoes completas:
 ```
 
 `audio.raw` possui o mesmo formato das pastas `/Sxxx`: PCM mono `int16`
-little-endian a 44100 Hz. A sessao dura cinco minutos, usa uma unica
-prealocacao de 26548200 bytes e nao cria `imu.bin`. `journal.txt` continua
+little-endian a 44100 Hz. A sessao dura dez minutos, usa uma unica
+prealocacao de 53008200 bytes, incluindo um segundo de margem, e nao cria
+`imu.bin`. `journal.txt` continua
 sendo a fonte de `audio_valid_bytes`, de modo que `python/export_audio.py`
 funciona sem alteracoes especificas para `/Mxxx`.
 
 `status.txt` registra apenas o caminho de audio: blocos DMA recebidos e
 perdidos, ocupacao maxima, silencio inserido, eventos e maior gap, bytes,
-escritas, falhas, flushes e latencias. O teste e considerado integro quando o
-arquivo possui aproximadamente 300 segundos, as falhas de escrita sao zero e
+escritas, falhas, flushes e latencias. Os campos prefixados por `phase0_`
+descrevem os primeiros cinco minutos com blocos de 1024 bytes; `phase1_`
+descreve os cinco minutos seguintes com blocos de 2048 bytes. Cada fase inclui
+um histograma nas faixas `<1`, `1-2`, `2-5`, `5-10`, `10-20`, `20-50`,
+`50-100` e `>=100 ms`. O teste e considerado integro quando o
+arquivo possui aproximadamente 600 segundos, as falhas de escrita sao zero e
 os contadores de perda/zero-fill sao zero ou suficientemente baixos para serem
 investigados individualmente.

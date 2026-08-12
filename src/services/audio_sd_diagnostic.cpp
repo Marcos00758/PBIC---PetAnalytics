@@ -10,6 +10,18 @@ namespace {
 
 constexpr char kTestPath[] = "/pbic_mic_sd_test.tmp";
 constexpr uint8_t kTestPattern[] = {0x50, 0x42, 0x49, 0x43, 0x4D, 0x49, 0x43};
+constexpr uint32_t kLatencyUpperBoundsUs[] = {
+    1000U, 2000U, 5000U, 10000U, 20000U, 50000U, 100000U};
+constexpr const char* kLatencyBucketNames[] = {
+    "lt_1ms",   "1_2ms",    "2_5ms",    "5_10ms",
+    "10_20ms",  "20_50ms",  "50_100ms", "ge_100ms"};
+
+static_assert(sizeof(kLatencyUpperBoundsUs) / sizeof(uint32_t) + 1U ==
+                  kAudioSdLatencyBucketCount,
+              "latency histogram bounds must match bucket count");
+static_assert(sizeof(kLatencyBucketNames) / sizeof(const char*) ==
+                  kAudioSdLatencyBucketCount,
+              "latency histogram names must match bucket count");
 
 constexpr uint32_t audioBytesPerSecond() {
   return config::kMicrophoneSampleRateHz * config::kMicrophoneChannels *
@@ -70,6 +82,7 @@ bool AudioSdDiagnostic::start(
                     config::kAudioSdDiagnosticFlushSeconds;
   nextJournalBytes_ = audioBytesPerSecond() *
                       config::kAudioSdDiagnosticJournalSeconds;
+  phaseIndex_ = 0;
   startedMs_ = millis();
   if (!writeMetadata(preflight) || !writeJournal("recording") ||
       !writeStatus(captureCounters, "recording")) {
@@ -81,10 +94,14 @@ bool AudioSdDiagnostic::start(
   Serial.print(folder_);
   Serial.print(" duration_s=");
   Serial.print(config::kAudioSdDiagnosticDurationSeconds);
+  Serial.print(" phase_s=");
+  Serial.print(config::kAudioSdDiagnosticPhaseSeconds);
   Serial.print(" preallocated_bytes=");
   Serial.print(static_cast<uint32_t>(preallocatedBytes_));
-  Serial.print(" block_bytes=");
-  Serial.println(config::kSdAudioWriteBlockBytes);
+  Serial.print(" phase0_block_bytes=");
+  Serial.print(config::kAudioSdDiagnosticBlockBytes[0]);
+  Serial.print(" phase1_block_bytes=");
+  Serial.println(config::kAudioSdDiagnosticBlockBytes[1]);
   return true;
 }
 
@@ -108,8 +125,12 @@ bool AudioSdDiagnostic::enqueueAudio(const AudioPcmBlock& block) {
     if (!gapInProgress_) {
       gapInProgress_ = true;
       ++counters_.gapEvents;
+      ++counters_.phases[phaseIndex_].gapEvents;
       if (missingBlocks > counters_.maxGapBlocks) {
         counters_.maxGapBlocks = missingBlocks;
+      }
+      if (missingBlocks > counters_.phases[phaseIndex_].maxGapBlocks) {
+        counters_.phases[phaseIndex_].maxGapBlocks = missingBlocks;
       }
     }
     static const int16_t silence[config::kMicrophoneBlockSamples]{};
@@ -119,6 +140,7 @@ bool AudioSdDiagnostic::enqueueAudio(const AudioPcmBlock& block) {
       }
       ++nextSequence_;
       ++counters_.silenceBlocksInserted;
+      ++counters_.phases[phaseIndex_].silenceBlocksInserted;
     }
     if (nextSequence_ != block.sequence) {
       return false;
@@ -138,8 +160,12 @@ bool AudioSdDiagnostic::enqueueAudio(const AudioPcmBlock& block) {
 
 void AudioSdDiagnostic::service(
     const AudioCaptureCounters& captureCounters) {
+  const uint32_t elapsedMs = millis() - startedMs_;
+  if (state_ == State::kRecording) {
+    updatePhase(elapsedMs);
+  }
   if (state_ == State::kRecording &&
-      millis() - startedMs_ >=
+      elapsedMs >=
           config::kAudioSdDiagnosticDurationSeconds * 1000UL) {
     state_ = State::kDraining;
     Serial.print("MIC_SD_TEST_STOP_REQUESTED buffered_bytes=");
@@ -176,7 +202,7 @@ void AudioSdDiagnostic::service(
                            config::kAudioSdDiagnosticJournalSeconds;
       return;
     }
-    if (bufferedBytes_ >= config::kSdAudioWriteBlockBytes &&
+    if (bufferedBytes_ >= writeBlockBytes() &&
         !writeBufferedBytes(false)) {
       fail("audio_write");
     }
@@ -184,7 +210,7 @@ void AudioSdDiagnostic::service(
   }
 
   if (state_ == State::kDraining) {
-    if (bufferedBytes_ >= config::kSdAudioWriteBlockBytes) {
+    if (bufferedBytes_ >= writeBlockBytes()) {
       if (!writeBufferedBytes(false)) {
         fail("final_audio_write");
       }
@@ -336,12 +362,18 @@ bool AudioSdDiagnostic::writeMetadata(
   file.println(firstSampleTimestampUs_);
   file.print("duration_seconds=");
   file.println(config::kAudioSdDiagnosticDurationSeconds);
+  file.print("phase_duration_seconds=");
+  file.println(config::kAudioSdDiagnosticPhaseSeconds);
   file.print("preallocated_bytes=");
   file.println(static_cast<uint32_t>(preallocatedBytes_));
   file.print("sd_spi_clock_mhz=");
   file.println(config::kSdSpiClockMHz);
-  file.print("sd_write_block_bytes=");
-  file.println(config::kSdAudioWriteBlockBytes);
+  file.print("phase0_write_block_bytes=");
+  file.println(config::kAudioSdDiagnosticBlockBytes[0]);
+  file.print("phase1_write_block_bytes=");
+  file.println(config::kAudioSdDiagnosticBlockBytes[1]);
+  file.println(
+      "write_latency_histogram_bins_us=1000,2000,5000,10000,20000,50000,100000");
   file.print("audio_capture_queue_usable_blocks=");
   file.println(config::kMicrophoneQueueBlocks - 1U);
   file.println("audio_gap_policy=zero_fill");
@@ -459,6 +491,54 @@ bool AudioSdDiagnostic::writeStatus(
   file.println(counters_.maxJournalDurationUs);
   file.print("sd_slow_journal_updates_over_10ms=");
   file.println(counters_.slowJournalUpdates);
+  for (size_t phase = 0; phase < config::kAudioSdDiagnosticPhaseCount;
+       ++phase) {
+    const AudioSdPhaseMetrics& metrics = counters_.phases[phase];
+    file.print("phase");
+    file.print(phase);
+    file.print("_write_block_bytes=");
+    file.println(config::kAudioSdDiagnosticBlockBytes[phase]);
+    file.print("phase");
+    file.print(phase);
+    file.print("_bytes_written=");
+    file.println(metrics.bytesWritten);
+    file.print("phase");
+    file.print(phase);
+    file.print("_write_attempts=");
+    file.println(metrics.writeAttempts);
+    file.print("phase");
+    file.print(phase);
+    file.print("_write_failures=");
+    file.println(metrics.writeFailures);
+    file.print("phase");
+    file.print(phase);
+    file.print("_silence_blocks_inserted=");
+    file.println(metrics.silenceBlocksInserted);
+    file.print("phase");
+    file.print(phase);
+    file.print("_gap_events=");
+    file.println(metrics.gapEvents);
+    file.print("phase");
+    file.print(phase);
+    file.print("_max_gap_blocks=");
+    file.println(metrics.maxGapBlocks);
+    file.print("phase");
+    file.print(phase);
+    file.print("_max_buffered_bytes=");
+    file.println(metrics.maxBufferedBytes);
+    file.print("phase");
+    file.print(phase);
+    file.print("_max_write_duration_us=");
+    file.println(metrics.maxWriteDurationUs);
+    for (size_t bucket = 0; bucket < kAudioSdLatencyBucketCount; ++bucket) {
+      file.print("phase");
+      file.print(phase);
+      file.print("_write_latency_");
+      file.print(kLatencyBucketNames[bucket]);
+      file.print('=');
+      file.println(metrics.writeLatencyBuckets[bucket]);
+    }
+  }
   file.flush();
   file.close();
   SD.remove(path);
@@ -481,18 +561,22 @@ bool AudioSdDiagnostic::appendSamples(const int16_t* samples) {
   if (bufferedBytes_ > counters_.maxBufferedBytes) {
     counters_.maxBufferedBytes = bufferedBytes_;
   }
+  AudioSdPhaseMetrics& phase = counters_.phases[phaseIndex_];
+  if (bufferedBytes_ > phase.maxBufferedBytes) {
+    phase.maxBufferedBytes = bufferedBytes_;
+  }
   return true;
 }
 
 bool AudioSdDiagnostic::writeBufferedBytes(bool allowPartialBlock) {
+  const size_t blockBytes = writeBlockBytes();
   if (bufferedBytes_ == 0 ||
-      (!allowPartialBlock &&
-       bufferedBytes_ < config::kSdAudioWriteBlockBytes)) {
+      (!allowPartialBlock && bufferedBytes_ < blockBytes)) {
     return false;
   }
   size_t count = bufferedBytes_;
-  if (count > config::kSdAudioWriteBlockBytes) {
-    count = config::kSdAudioWriteBlockBytes;
+  if (count > blockBytes) {
+    count = blockBytes;
   }
   const size_t contiguous = config::kSdAudioRamBufferBytes - head_;
   const uint8_t* source = &buffer_[head_];
@@ -501,21 +585,27 @@ bool AudioSdDiagnostic::writeBufferedBytes(bool allowPartialBlock) {
     memcpy(writeScratch_ + contiguous, buffer_, count - contiguous);
     source = writeScratch_;
   }
-  if (count < config::kSdAudioWriteBlockBytes) {
+  if (count < blockBytes) {
     ++counters_.partialWrites;
   }
   ++counters_.writeAttempts;
+  AudioSdPhaseMetrics& phase = counters_.phases[phaseIndex_];
+  ++phase.writeAttempts;
   const uint32_t startedUs = micros();
   const size_t written = audioFile_.write(source, count);
-  recordDuration(micros() - startedUs, counters_.maxWriteDurationUs,
+  const uint32_t durationUs = micros() - startedUs;
+  recordDuration(durationUs, counters_.maxWriteDurationUs,
                  counters_.slowWrites);
+  recordWriteLatency(durationUs);
   if (written != count) {
     ++counters_.writeFailures;
+    ++phase.writeFailures;
     return false;
   }
   head_ = (head_ + written) % config::kSdAudioRamBufferBytes;
   bufferedBytes_ -= written;
   counters_.bytesWritten += written;
+  phase.bytesWritten += written;
   return true;
 }
 
@@ -558,6 +648,39 @@ void AudioSdDiagnostic::recordDuration(uint32_t durationUs,
   if (durationUs >= config::kSdSlowOperationThresholdUs) {
     ++slowOperations;
   }
+}
+
+void AudioSdDiagnostic::recordWriteLatency(uint32_t durationUs) {
+  size_t bucket = 0;
+  while (bucket < kAudioSdLatencyBucketCount - 1U &&
+         durationUs >= kLatencyUpperBoundsUs[bucket]) {
+    ++bucket;
+  }
+  AudioSdPhaseMetrics& phase = counters_.phases[phaseIndex_];
+  ++phase.writeLatencyBuckets[bucket];
+  if (durationUs > phase.maxWriteDurationUs) {
+    phase.maxWriteDurationUs = durationUs;
+  }
+}
+
+void AudioSdDiagnostic::updatePhase(uint32_t elapsedMs) {
+  size_t phase = elapsedMs /
+                 (config::kAudioSdDiagnosticPhaseSeconds * 1000UL);
+  if (phase >= config::kAudioSdDiagnosticPhaseCount) {
+    phase = config::kAudioSdDiagnosticPhaseCount - 1U;
+  }
+  if (phase == phaseIndex_) {
+    return;
+  }
+  phaseIndex_ = phase;
+  Serial.print("MIC_SD_TEST_PHASE index=");
+  Serial.print(phaseIndex_);
+  Serial.print(" block_bytes=");
+  Serial.println(writeBlockBytes());
+}
+
+size_t AudioSdDiagnostic::writeBlockBytes() const {
+  return config::kAudioSdDiagnosticBlockBytes[phaseIndex_];
 }
 
 }  // namespace pet::services
