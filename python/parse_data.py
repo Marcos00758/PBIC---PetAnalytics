@@ -207,6 +207,7 @@ def iter_binary_packets(
     stream: BinaryIO,
     stats: ParseStats,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
+    max_bytes: int | None = None,
 ) -> Iterator[ParsedPacket]:
     """Yield valid packets while retaining only a small byte buffer."""
     if chunk_size < PACKET_SIZE:
@@ -215,9 +216,16 @@ def iter_binary_packets(
     pending = bytearray()
     absolute_offset = 0
     previous_sequence: int | None = None
+    remaining = max_bytes
 
     while True:
-        chunk = stream.read(chunk_size)
+        if remaining is not None and remaining <= 0:
+            chunk = b""
+        else:
+            read_size = chunk_size if remaining is None else min(chunk_size, remaining)
+            chunk = stream.read(read_size)
+            if remaining is not None:
+                remaining -= len(chunk)
         if chunk:
             pending.extend(chunk)
 
@@ -267,8 +275,10 @@ def iter_file_packets(
     stats: ParseStats,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> Iterator[ParsedPacket]:
+    journal = load_session_journal(path)
+    valid_bytes = _validated_journal_size(path, journal.get("imu_valid_bytes"))
     with path.open("rb") as stream:
-        yield from iter_binary_packets(stream, stats, chunk_size)
+        yield from iter_binary_packets(stream, stats, chunk_size, valid_bytes)
 
 
 def parse_stream(data: bytes | bytearray | memoryview) -> tuple[list[ParsedPacket], ParseStats]:
@@ -326,18 +336,45 @@ def elapsed_us(start_timestamp: int, end_timestamp: int) -> int:
     return (end_timestamp - start_timestamp) & 0xFFFFFFFF
 
 
-def load_session_metadata(input_path: Path) -> dict[str, str]:
-    """Load key/value metadata written next to an SD session imu.bin."""
-    metadata_path = input_path.parent / "meta.txt"
-    if not metadata_path.exists():
+def load_key_value_file(path: Path) -> dict[str, str]:
+    if not path.exists():
         return {}
-    metadata: dict[str, str] = {}
-    for line in metadata_path.read_text(encoding="ascii", errors="replace").splitlines():
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="ascii", errors="replace").splitlines():
         if "=" not in line:
             continue
         key, value = line.split("=", 1)
-        metadata[key.strip()] = value.strip()
-    return metadata
+        values[key.strip()] = value.strip()
+    return values
+
+
+def load_session_metadata(input_path: Path) -> dict[str, str]:
+    """Load key/value metadata written next to an SD session imu.bin."""
+    return load_key_value_file(input_path.parent / "meta.txt")
+
+
+def load_session_journal(input_path: Path) -> dict[str, str]:
+    """Load the last committed sizes for a preallocated SD session."""
+    session = input_path if input_path.is_dir() else input_path.parent
+    return load_key_value_file(session / "journal.txt")
+
+
+def _validated_journal_size(path: Path, encoded: str | None) -> int | None:
+    if encoded is None:
+        return None
+    try:
+        size = int(encoded)
+    except ValueError:
+        return None
+    file_size = path.stat().st_size
+    return size if 0 <= size <= file_size else None
+
+
+def valid_audio_bytes(path: Path) -> int:
+    """Return the committed PCM prefix, excluding any preallocated tail."""
+    journal = load_session_journal(path)
+    size = _validated_journal_size(path, journal.get("audio_valid_bytes"))
+    return path.stat().st_size if size is None else size
 
 
 def load_bmp390_calibrations(

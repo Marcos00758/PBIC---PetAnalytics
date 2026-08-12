@@ -330,11 +330,23 @@ ambiente em silencio. Media DC, RMS, pico e clipping sao registrados em
 mantem a aquisicao dos sensores e emite `AUDIO_CAPTURE_REJECTED`; o firmware
 nao tenta corrigir saturacao com ganho ou filtro digital.
 
-O primeiro timestamp de audio e estimado pelo instante de entrega do primeiro
-bloco DMA menos a duracao desse bloco. `meta.txt` registra formato, taxa,
-canal, alinhamento, timestamp e incerteza maxima de um bloco. A prealocacao foi
-mantida desativada porque SdFat exige truncamento no encerramento, enquanto a
-versao atual ainda admite desligamento direto sem uma rotina de fechamento.
+Cada bloco de audio recebe um timestamp apenas na fila RAM. O valor nao altera
+o PCM em `audio.raw`, mas permite registrar no journal o primeiro bloco exato
+de cada sessao rotacionada. `meta.txt` registra formato, taxa e configuracao;
+`journal.txt` e a referencia mais atual para timestamp e tamanhos validos.
+
+O logger usa `FsFile::preAllocate()` para reservar `imu.bin` e `audio.raw`.
+No teste atual, cada pasta cobre cinco minutos mais um segundo de margem. Ao
+atingir cinco minutos, o firmware deixa de aceitar novos blocos, drena as duas
+filas, faz flush, trunca os arquivos, marca o journal como
+`completed_duration` e cria automaticamente a proxima pasta. A prealocacao da
+proxima pasta pode causar um pico isolado; sua duracao e registrada em
+`sd_preallocation_duration_us`.
+
+O journal e escrito apos o primeiro flush, por volta de dez segundos, e depois
+a cada 3000 pacotes, aproximadamente 30 segundos. Uma sessao interrompida pode
+manter a cauda fisica prealocada, mas `parse_data.py`, `analyze_imu.py` e
+`export_audio.py` limitam a leitura aos tamanhos confirmados.
 
 Capturas reais mostraram dois estados distintos do sinal. S010 ficou em cerca
 de `-51,7 dBFS` RMS, sem ruido aparente; S013 iniciou e permaneceu saturado,
@@ -344,8 +356,6 @@ firmware nao aplica ganho digital; alimentacao, GND, DOUT e sincronismo de boot
 do breakout ainda precisam ser validados antes de aceitar uma sessao de audio.
 
 O S017 confirmou uma segunda causa independente: o volume terminou com apenas
-1024 bytes livres. O logger agora mede os clusters no boot, reserva 4 MiB para
-fechamento seguro e calcula o orcamento da sessao a partir do espaco livre. A
-sessao para de aceitar dados e drena os buffers ao atingir a reserva ou o limite
-de 30 minutos; falta de espaco no boot e reportada como
-`insufficient_free_space`.
+1024 bytes livres. O logger mede os clusters no boot e reserva 4 MiB. Antes de
+cada rotacao, verifica se ha espaco para a proxima prealocacao completa; falta
+de espaco e reportada antes de iniciar novos fluxos.

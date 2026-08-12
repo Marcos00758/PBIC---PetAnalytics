@@ -17,7 +17,7 @@ constexpr uint8_t kMicrophoneChannels = 1;
 constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.3.2";
+constexpr char kFirmwareVersion[] = "0.4.0";
 
 constexpr size_t kSdRamBufferBytes = 8192;
 constexpr size_t kSdAudioRamBufferBytes = 32768;
@@ -26,8 +26,10 @@ constexpr size_t kSdAudioWriteBlockBytes = 512;
 constexpr uint8_t kSdSpiClockMHz = 12;
 constexpr uint64_t kSdFreeSpaceReserveBytes = 4ULL * 1024ULL * 1024ULL;
 constexpr uint32_t kSdMinimumRecordingSeconds = 60;
-constexpr uint32_t kSdMaximumSessionSeconds = 30U * 60U;
+constexpr uint32_t kSdSessionDurationSeconds = 5U * 60U;
+constexpr uint32_t kSdPreallocationMarginSeconds = 1;
 constexpr uint32_t kSdPacketsPerFlush = 1000;
+constexpr uint32_t kSdPacketsPerJournalUpdate = 3000;
 constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
 constexpr uint32_t kSdHealthWindowMs = 2000;
 constexpr uint32_t kSdWriteRetryMs = 20;

@@ -45,10 +45,11 @@ audio e gera `AUDIO_CAPTURE_REJECTED`.
 
 ## Sessões no cartão SD
 
-Com um cartão FAT ou exFAT conectado nos pinos documentados, cada boot cria uma
-nova pasta `/Sxxx`. O firmware não espera a USB e continua adquirindo sem
-computador. O arquivo `imu.bin` permanece aberto, recebe escritas em blocos a
-partir de um buffer RAM e faz flush periódico.
+Com um cartão FAT ou exFAT conectado nos pinos documentados, o firmware cria
+pastas `/Sxxx` consecutivas sem depender de reboot. Para o teste atual, cada
+sessao dura cinco minutos; ao final, os arquivos sao truncados para o tamanho
+real e a proxima pasta e prealocada automaticamente. O firmware nao espera a
+USB e continua adquirindo sem computador.
 
 Se um arquivo do SD ficar dois segundos completos sem qualquer progresso de
 escrita, o firmware emite
@@ -57,16 +58,20 @@ pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
 e só é controlado depois que o SPI foi encerrado com segurança.
 
 Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz,
-`imu.bin` e `audio.raw` usam blocos de 512 bytes. No boot o firmware informa o
-espaco livre e a duracao estimada. Ele preserva 4 MiB de reserva e encerra a
-sessao de modo controlado ao atingir essa reserva ou 30 minutos. Uma sessao de
-30 minutos com IMU e audio requer aproximadamente 173 MB livres.
+`imu.bin` e `audio.raw` usam blocos de 512 bytes. Cada pasta possui
+`journal.txt`, com os tamanhos confirmados dos dois fluxos. Uma queda de
+energia pode deixar uma cauda prealocada, mas o Python ignora automaticamente
+os bytes posteriores ao journal. Para mudar o teste de cinco minutos para uma
+hora, altere apenas `kSdSessionDurationSeconds` depois da validacao em hardware.
 
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
+ajuste a letra da unidade caso o Windows monte o cartão em outro caminho.
 
 ```powershell
-python python/parse_data.py D:/S001/imu.bin
-python python/analyze_imu.py D:/S001/imu.bin --no-show
+python python/parse_data.py E:/S001/imu.bin
+python python/analyze_imu.py E:/S001/imu.bin --no-show
+python python/export_audio.py E:/S001 --gain-db 18
+ffplay data/S001_audio.wav
 ```
 
 Quando `meta.txt` acompanha `imu.bin`, o analisador aplica automaticamente a
@@ -134,3 +139,13 @@ esta ligado ao GND.
 Na configuracao normal, `kMicrophoneDiagnosticEnabled=false` e
 `kMicrophoneRecordingEnabled=true`. Nesse modo `audio.raw` e gravado junto de
 `imu.bin`; o diagnostico isolado nao cria arquivos.
+
+O arquivo cru tambem pode ser ouvido diretamente com FFplay 8 usando
+`-ch_layout mono`:
+
+```powershell
+ffplay -f s16le -ar 44100 -ch_layout mono "E:/S001/audio.raw"
+```
+
+Para audio de baixo nivel, prefira `python/export_audio.py --gain-db 18`.
+O ganho afeta somente o WAV de reproducao; `audio.raw` permanece inalterado.

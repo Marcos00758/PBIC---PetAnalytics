@@ -34,6 +34,7 @@ bool AudioCaptureSink::pop(AudioPcmBlock& block) {
   if (tail == head_) {
     return false;
   }
+  block.timestampUs = queue_[tail].timestampUs;
   memcpy(block.samples, queue_[tail].samples, sizeof(block.samples));
   __disable_irq();
   tail_ = static_cast<uint16_t>((tail + 1U) % config::kMicrophoneQueueBlocks);
@@ -89,6 +90,7 @@ void AudioCaptureSink::update() {
   if (nextHead == tail_) {
     ++blocksDropped_;
   } else {
+    queue_[head_].timestampUs = micros() - kAudioBlockDurationUs;
     memcpy(queue_[head_].samples, left->data, sizeof(queue_[head_].samples));
     head_ = nextHead;
     const uint16_t count = queueCount(head_, tail_);

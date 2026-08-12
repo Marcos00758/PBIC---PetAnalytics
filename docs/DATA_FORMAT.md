@@ -155,6 +155,7 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 /S001/imu.bin
 /S001/audio.raw
 /S001/meta.txt
+/S001/journal.txt
 /S001/status.txt
 ```
 
@@ -173,11 +174,11 @@ minutos. Somado aos pacotes IMU, o volume nominal da sessao e aproximadamente
 173 MB em 30 minutos. O arquivo fica aberto junto de `imu.bin`. A fila DMA/RAM de captura e
 a fila do SD sao independentes das filas dos pacotes IMU.
 
-O volume e consultado uma vez no boot. O logger mantem 4 MiB fora do orcamento
-de gravacao, recusa iniciar com menos de 60 segundos estimados e encerra a
-sessao de forma controlada ao atingir a reserva ou 30 minutos. As mensagens
-`SD_SESSION_STOP_REQUESTED` e `SD_SESSION_STOPPED` indicam esse encerramento;
-ele nao e tratado como falha do cartao.
+O volume e consultado no boot e antes de cada nova sessao. O teste atual usa
+rotacao automatica a cada 300 segundos. A reserva nominal por pasta, incluindo
+um segundo de margem, e de 2.377.900 bytes para `imu.bin` e 26.548.200 bytes
+para `audio.raw`. Uma configuracao de uma hora usa a mesma logica alterando
+`kSdSessionDurationSeconds`.
 
 O timestamp inicial do audio usa a mesma origem `micros()` dos pacotes IMU. Ele
 e estimado no recebimento do primeiro bloco DMA, subtraindo a duracao de 128
@@ -201,7 +202,11 @@ sd_audio_write_block_bytes=512
 sd_free_bytes_at_boot=<bytes livres medidos>
 sd_recording_budget_bytes=<bytes livres menos 4 MiB>
 sd_estimated_recording_seconds=<estimativa nominal>
-sd_maximum_session_seconds=1800
+sd_session_duration_seconds=300
+sd_preallocation_margin_seconds=1
+imu_preallocated_bytes=2377900
+audio_preallocated_bytes=26548200
+journal_update_packets=3000
 audio_enabled=1
 audio_file=audio.raw
 audio_format=pcm_s16le
@@ -219,6 +224,9 @@ audio_preflight_mean_counts=<media DC>
 audio_preflight_rms_counts=<RMS sem DC>
 audio_preflight_peak_counts=<pico absoluto>
 audio_preflight_clipping_samples=<amostras proximas da escala completa>
+preallocation_enabled=1
+preallocation_tail_source=journal.txt
+completed_sessions_truncated=1
 bmp0_nvm_valid=1
 bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1
@@ -231,12 +239,30 @@ Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
 cruas e informa `bmp_compensation=unavailable_raw_only`.
 
-A prealocacao SdFat foi avaliada e permanece desativada. `preAllocate()` muda o
-tamanho logico do arquivo e requer `truncate()` no encerramento para remover a
-area nao escrita. Como o wearable ainda nao possui comando de parada e pode
-ser desligado diretamente, habilita-la produziria arquivos com cauda invalida
-apos perda de energia. As filas RAM foram dimensionadas para absorver as
-pausas de SD observadas sem depender dessa operacao.
+A prealocacao SdFat esta habilitada para os dois fluxos. Sessoes completadas
+sao truncadas para os tamanhos efetivos. Se houver desligamento abrupto, os
+arquivos podem manter a cauda reservada; ela nao deve ser interpretada como
+dado real.
+
+`journal.txt` e ASCII `chave=valor` e contem:
+
+```text
+state=recording
+session=1
+uptime_ms=<tempo do ultimo checkpoint>
+imu_valid_bytes=<prefixo confirmado de imu.bin>
+audio_valid_bytes=<prefixo confirmado de audio.raw>
+audio_start_timestamp_valid=1
+audio_start_timestamp_us=<timestamp do primeiro bloco desta pasta>
+imu_preallocated_bytes=<tamanho reservado>
+audio_preallocated_bytes=<tamanho reservado>
+```
+
+O primeiro checkpoint util ocorre apos aproximadamente dez segundos e os
+seguintes a cada 30 segundos. `python/parse_data.py` e
+`python/analyze_imu.py` aplicam `imu_valid_bytes` automaticamente.
+`python/export_audio.py` usa `audio_valid_bytes` e gera um WAV sem a cauda.
+O ganho opcional do WAV nao modifica o arquivo cientifico cru.
 
 `status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
 minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,

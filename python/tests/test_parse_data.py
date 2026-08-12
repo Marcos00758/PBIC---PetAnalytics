@@ -15,9 +15,11 @@ from parse_data import (
     ParseStats,
     crc8,
     iter_binary_packets,
+    iter_file_packets,
     load_bmp390_calibrations,
     load_session_metadata,
     parse_stream,
+    valid_audio_bytes,
 )
 
 
@@ -124,6 +126,28 @@ class ParseDataTest(unittest.TestCase):
         pressure, temperature = calibrations[0].compensate(6_000_000, 8_000_000)
         self.assertTrue(pressure == pressure)
         self.assertTrue(temperature == temperature)
+
+    def test_uses_journal_to_ignore_preallocated_tails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            imu_path = session / "imu.bin"
+            packet = make_packet(sequence=12)
+            imu_path.write_bytes(packet + bytes(4096))
+            audio_path = session / "audio.raw"
+            audio_path.write_bytes(b"\x01\x02\x03\x04" + bytes(1024))
+            (session / "journal.txt").write_text(
+                f"imu_valid_bytes={len(packet)}\n"
+                "audio_valid_bytes=4\n",
+                encoding="ascii",
+            )
+
+            stats = ParseStats()
+            packets = list(iter_file_packets(imu_path, stats))
+
+            self.assertEqual(len(packets), 1)
+            self.assertEqual(stats.discarded_bytes, 0)
+            self.assertEqual(stats.trailing_bytes, 0)
+            self.assertEqual(valid_audio_bytes(audio_path), 4)
 
 
 if __name__ == "__main__":

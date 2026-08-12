@@ -48,6 +48,10 @@ struct SdLoggerCounters {
   uint32_t maxAudioFlushDurationUs = 0;
   uint32_t slowAudioWrites = 0;
   uint32_t slowAudioFlushes = 0;
+  uint32_t journalUpdates = 0;
+  uint32_t maxJournalDurationUs = 0;
+  uint32_t slowJournalUpdates = 0;
+  uint32_t maxPreallocationDurationUs = 0;
 };
 
 class SdLogger {
@@ -80,12 +84,15 @@ class SdLogger {
   bool chooseSessionNumber();
   bool persistSessionNumber();
   bool writeMetadata(const SdSessionMetadata& metadata);
-  bool openAudioFile();
+  bool openAndPreallocateDataFiles();
+  bool hasSpaceForNextSession();
+  bool writeJournal(const char* state);
   bool writeStatus(const AcquisitionCounters& acquisitionCounters,
                    const AudioCaptureCounters& audioCounters,
                    const char* state);
   bool writeBufferedBytes(bool allowPartialBlock);
   bool writeAudioBufferedBytes(bool allowPartialBlock);
+  void discardEmptyPreallocation();
   void advanceBuffer(size_t count);
   void advanceAudioBuffer(size_t count);
   void checkWriteFailureTimeout();
@@ -97,8 +104,8 @@ class SdLogger {
                                uint32_t& slowOperations);
   void buildPath(char* destination, size_t length, const char* filename) const;
 
-  File imuFile_;
-  File audioFile_;
+  FsFile imuFile_;
+  FsFile audioFile_;
   uint8_t buffer_[config::kSdRamBufferBytes]{};
   uint8_t audioBuffer_[config::kSdAudioRamBufferBytes]{};
   size_t bufferHead_ = 0;
@@ -110,6 +117,7 @@ class SdLogger {
   uint32_t sessionNumber_ = 0;
   char sessionFolder_[16]{};
   uint32_t packetsAtLastFlush_ = 0;
+  uint32_t packetsAtLastJournal_ = 0;
   uint32_t packetsAtLastStatus_ = 0;
   uint32_t nextWriteRetryMs_ = 0;
   uint32_t imuWriteFailureStartedMs_ = 0;
@@ -125,6 +133,10 @@ class SdLogger {
   uint64_t freeBytesAtBoot_ = 0;
   uint64_t recordingBudgetBytes_ = 0;
   uint32_t estimatedRecordingSeconds_ = 0;
+  uint64_t imuPreallocatedBytes_ = 0;
+  uint64_t audioPreallocatedBytes_ = 0;
+  uint32_t audioFirstTimestampUs_ = 0;
+  bool audioFirstTimestampValid_ = false;
   bool stopRequested_ = false;
   const char* stopReason_ = nullptr;
   SdSessionMetadata sessionMetadata_{};

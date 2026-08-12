@@ -265,7 +265,11 @@ void setup() {
       Serial.print(" flush_packets=");
       Serial.print(pet::config::kSdPacketsPerFlush);
       Serial.print(" audio_buffer_bytes=");
-      Serial.println(pet::config::kSdAudioRamBufferBytes);
+      Serial.print(pet::config::kSdAudioRamBufferBytes);
+      Serial.print(" session_seconds=");
+      Serial.print(pet::config::kSdSessionDurationSeconds);
+      Serial.print(" journal_packets=");
+      Serial.println(pet::config::kSdPacketsPerJournalUpdate);
     } else {
       Serial.println("SD session creation FAILED; recording disabled until reboot");
     }

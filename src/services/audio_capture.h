@@ -8,8 +8,12 @@
 namespace pet::services {
 
 struct AudioPcmBlock {
+  uint32_t timestampUs = 0;
   int16_t samples[config::kMicrophoneBlockSamples];
 };
+
+constexpr size_t kAudioPcmBytesPerBlock =
+    config::kMicrophoneBlockSamples * sizeof(int16_t);
 
 struct AudioCaptureCounters {
   uint32_t blocksReceived = 0;
