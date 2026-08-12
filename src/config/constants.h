@@ -7,6 +7,7 @@ namespace pet::config {
 constexpr uint32_t kSerialBaud = 115200;
 constexpr bool kUsbBinaryStreamEnabled = false;
 constexpr bool kMicrophoneDiagnosticEnabled = false;
+constexpr bool kAudioSdDiagnosticEnabled = true;
 constexpr bool kMicrophoneRecordingEnabled = true;
 constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
 constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
@@ -52,6 +53,25 @@ constexpr uint32_t kAudioPreflightDurationMs = 2000;
 constexpr int32_t kAudioPreflightMaximumAbsMeanCounts = 1024;
 constexpr uint32_t kAudioPreflightMaximumRmsCounts = 4096;
 constexpr uint32_t kAudioPreflightMaximumClippingPpm = 100;
+
+constexpr uint32_t kAudioSdDiagnosticPhaseSeconds = 5U * 60U;
+constexpr uint32_t kAudioSdDiagnosticDurationSeconds =
+    2U * kAudioSdDiagnosticPhaseSeconds;
+constexpr size_t kAudioSdDiagnosticBlockBytes[] = {1024U, 2048U};
+constexpr size_t kAudioSdDiagnosticPhaseCount =
+    sizeof(kAudioSdDiagnosticBlockBytes) /
+    sizeof(kAudioSdDiagnosticBlockBytes[0]);
+constexpr uint32_t kAudioSdDiagnosticFlushSeconds = 10U;
+constexpr uint32_t kAudioSdDiagnosticJournalSeconds = 30U;
+static_assert(kAudioSdDiagnosticPhaseCount == 2,
+              "audio SD benchmark requires two phases");
+static_assert(kSdAudioRamBufferBytes % kAudioSdDiagnosticBlockBytes[0] == 0 &&
+                  kSdAudioRamBufferBytes %
+                          kAudioSdDiagnosticBlockBytes[1] ==
+                      0,
+              "audio SD buffer must contain complete benchmark blocks");
+static_assert(!(kMicrophoneDiagnosticEnabled && kAudioSdDiagnosticEnabled),
+              "enable only one microphone diagnostic mode");
 
 constexpr uint8_t kPca9548aAddress = 0x70;
 constexpr uint16_t kPcaChannelSettleUs = 80;

@@ -392,3 +392,25 @@ pacotes IMU porque ambas as filas ficaram cheias. A versao 0.4.1 altera a ordem
 de boot e a prioridade das filas; se o novo preflight ou a gravacao continuarem
 ruidosos, a causa restante e eletrica entre SD e I2S e exige validacao de
 alimentacao, GND e roteamento dos fios.
+
+## Diagnostico isolado de audio no SD
+
+O servico `src/services/audio_sd_diagnostic` existe para separar o caminho
+ICS43434/DMA/SD da aquisicao I2C. Com `kAudioSdDiagnosticEnabled=true`, `main`
+retorna antes de inicializar `Wire`, PCA9548A, ICM-20948 e BMP390. O teste cria
+uma pasta `/Mxxx`, prealoca uma unica janela de cinco minutos e nao rotaciona
+arquivos. Assim, nenhuma prealocacao ocorre durante a captura.
+
+O caminho isolado preserva PCM16 mono a 44100 Hz, blocos SD de 512 bytes,
+sequencia DMA e zero-fill de gaps. Faz `sync()` a cada dez segundos e atualiza
+o journal a cada trinta segundos. No limite de cinco minutos, desliga a origem
+I2S, drena a fila, sincroniza, trunca e grava o status final. Esse modo e
+temporario e mutuamente exclusivo com o diagnostico I2S somente em RAM.
+
+S012 demonstrou que a continuidade de audio foi preservada por zero-fill:
+300,008 s, 76 blocos perdidos em 50 eventos e maior gap de quatro blocos. No
+entanto, a politica integrada priorizou audio em 51567 escritas e descartou
+23551 pacotes IMU. Portanto, essa perda IMU ocorreu por starvation no
+agendador integrado, nao por falta de espaco ou apenas pela prealocacao da
+sessao seguinte. O teste `/Mxxx` deve determinar separadamente se ainda existem
+perdas ou ruido sem qualquer transacao I2C.

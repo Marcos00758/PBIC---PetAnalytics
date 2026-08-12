@@ -322,3 +322,28 @@ o ultimo `status.txt`, que pode ter sido escrito minutos antes.
 
 Somente pacotes aprovados por magic e CRC participam da validacao e dos
 graficos.
+
+## Sessao isolada de diagnostico do microfone
+
+O modo `kAudioSdDiagnosticEnabled=true` cria uma estrutura separada para nao
+misturar o ensaio com as sessoes completas:
+
+```text
+/M001/audio.raw
+/M001/meta.txt
+/M001/journal.txt
+/M001/status.txt
+```
+
+`audio.raw` possui o mesmo formato das pastas `/Sxxx`: PCM mono `int16`
+little-endian a 44100 Hz. A sessao dura cinco minutos, usa uma unica
+prealocacao de 26548200 bytes e nao cria `imu.bin`. `journal.txt` continua
+sendo a fonte de `audio_valid_bytes`, de modo que `python/export_audio.py`
+funciona sem alteracoes especificas para `/Mxxx`.
+
+`status.txt` registra apenas o caminho de audio: blocos DMA recebidos e
+perdidos, ocupacao maxima, silencio inserido, eventos e maior gap, bytes,
+escritas, falhas, flushes e latencias. O teste e considerado integro quando o
+arquivo possui aproximadamente 300 segundos, as falhas de escrita sao zero e
+os contadores de perda/zero-fill sao zero ou suficientemente baixos para serem
+investigados individualmente.

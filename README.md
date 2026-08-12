@@ -130,6 +130,36 @@ python python/calibrate_magnetometer.py data/rotacao_3d.bin
 
 ## Diagnostico do microfone
 
+### Teste isolado microfone + SD
+
+`kAudioSdDiagnosticEnabled=true` ativa temporariamente um teste de cinco
+minutos que inicializa somente o ICS43434 e o cartao SD. Nesse modo, o firmware
+nao inicializa `Wire`, PCA9548A, ICM-20948 ou BMP390 e nao cria pastas `/Sxxx`.
+Ele cria uma unica pasta `/Mxxx`, prealoca `audio.raw` antes de iniciar o I2S e
+nao faz rotacao automatica. Ao fim, desliga a captura, drena o buffer, trunca o
+arquivo e emite `MIC_SD_TEST_COMPLETED`.
+
+Carregue e monitore:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --target upload --target monitor --upload-port COM3
+```
+
+Depois de `MIC_SD_TEST_COMPLETED`, desligue a Teensy, remova o cartao e use a
+letra atribuida pelo Windows:
+
+```powershell
+Get-Content E:/M001/status.txt
+Get-Content E:/M001/journal.txt
+python python/export_audio.py E:/M001
+ffplay data/M001_audio.wav
+```
+
+O resultado esperado e aproximadamente 300 segundos, zero falhas de escrita e,
+idealmente, zero blocos perdidos ou preenchidos com silencio. Para voltar ao
+firmware completo depois do teste, altere somente
+`kAudioSdDiagnosticEnabled=false`.
+
 `kMicrophoneDiagnosticEnabled=true` inicia somente o
 ICS43434 em RAM. SD, PCA9548A e sensores nao sao inicializados nesse modo. O
 monitor serial informa, a cada dois segundos, taxa efetiva, perdas da fila,
