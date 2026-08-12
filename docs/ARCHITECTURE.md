@@ -148,12 +148,17 @@ binário permanecer desabilitado. Com SD válido, o contador persistente
 durante a sessão.
 
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
-escreve `imu.bin` em blocos de até 512 bytes, faz flush a cada 1000 pacotes e
-atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O áudio usa blocos
-de até 512 bytes para limitar a duração de cada chamada ao cartão. Em cada
-passagem do loop ocorre no máximo uma escrita; quando as duas filas estão
-prontas, o logger escolhe a proporcionalmente mais cheia. O SPI do SD opera a
-12 MHz nesta configuração de robustez.
+escreve `imu.bin` e `audio.raw` em blocos completos de 512 bytes durante a
+gravacao normal; blocos parciais sao permitidos somente ao encerrar uma sessao.
+Em cada passagem do loop ocorre no maximo uma operacao de SD. Quando as duas
+filas estao prontas, o logger escolhe a proporcionalmente mais cheia e forca a
+prioridade do audio quando sua fila atinge 50%. O SPI opera a 12 MHz.
+
+Flush nao drena mais as filas. `imu.bin` e `audio.raw` possuem estados de flush
+independentes, executados em passagens diferentes do loop quando nao ha bloco
+pronto para escrita. O journal publica somente os bytes confirmados pelo ultimo
+`sync()` bem-sucedido de cada arquivo. Isso evita as escritas repetidas de 79
+bytes que anteriormente surgiam depois do primeiro flush.
 
 A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
 de progresso inicia um período de dois segundos; qualquer escrita posterior
@@ -316,8 +321,8 @@ conta blocos recebidos, overflow, blocos incompletos e maior ocupacao. O
 processamento nao usa `float` nem grava no SD dentro da interrupcao.
 
 O loop transfere os blocos para uma segunda fila de 32768 bytes pertencente ao
-`sd_logger`. A fila de captura tem 127 posicoes uteis, tambem cerca de 32 KiB;
-juntas oferecem aproximadamente 0,74 s de reserva a 44100 Hz. O logger mantem
+`sd_logger`. A fila de captura tem 511 posicoes uteis, aproximadamente 132 KiB;
+juntas oferecem aproximadamente 1,85 s de reserva a 44100 Hz. O logger mantem
 `imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve o audio em blocos de
 ate 512 bytes. Flush, escrita e falha do audio possuem contadores e latencias
 separados em `status.txt`. A janela de saude acompanha sucesso de cada arquivo
@@ -345,10 +350,23 @@ filas, faz flush, trunca os arquivos, marca o journal como
 proxima pasta pode causar um pico isolado; sua duracao e registrada em
 `sd_preallocation_duration_us`.
 
+Cada callback DMA atribui uma sequencia ao bloco, inclusive quando nao ha bloco
+valido disponivel. Se a fila de captura transbordar ou um callback ficar
+incompleto, o logger detecta o salto e insere a quantidade equivalente de
+blocos zerados antes do proximo bloco real. O PCM preserva duracao e
+alinhamento, mas o silencio sintetico nao recupera o sinal perdido. Os totais,
+eventos e maior gap ficam em `journal.txt` e `status.txt` e sao apresentados por
+`python/export_audio.py`.
+
 No primeiro boot, a prealocacao ocorre antes de ativar o I2S. Assim, o
-preflight mede o microfone depois do maior pico inicial de atividade do SD. O
-logger tambem atende primeiro qualquer bloco pendente de `imu.bin`; o audio usa
-o restante da banda e continua protegido por sua fila RAM independente.
+preflight mede o microfone depois do maior pico inicial de atividade do SD.
+Durante uma rotacao, o primeiro bloco real retirado da fila permanece pendente
+ate que todo silencio necessario caiba no buffer do SD. O inicio logico da nova
+sessao e o instante em que a anterior atingiu seu limite, nao o final da
+prealocacao. Flush, truncamento, journal e status finais avancam como etapas
+separadas, uma por passagem do loop. A prealocacao SdFat ainda e uma chamada
+sincrona; a fila DMA cobre essa pausa e qualquer excesso e representado por
+silencio, sem encurtar a linha do tempo do audio.
 
 O journal e escrito apos o primeiro flush, por volta de dez segundos, e depois
 a cada 3000 pacotes, aproximadamente 30 segundos. Uma sessao interrompida pode

@@ -25,7 +25,17 @@ class ExportAudioTest(unittest.TestCase):
                 encoding="ascii",
             )
             (session / "journal.txt").write_text(
-                f"audio_valid_bytes={samples.nbytes}\n", encoding="ascii"
+                f"audio_valid_bytes={samples.nbytes}\n"
+                "audio_silence_blocks_inserted=3\n"
+                "audio_gap_events=2\n"
+                "audio_max_gap_blocks=3\n",
+                encoding="ascii",
+            )
+            (session / "status.txt").write_text(
+                "audio_capture_blocks_dropped=2\n"
+                "sd_audio_silence_blocks_inserted=2\n"
+                "sd_audio_gap_events=1\n",
+                encoding="ascii",
             )
             output = Path(directory) / "audio.wav"
 
@@ -36,6 +46,10 @@ class ExportAudioTest(unittest.TestCase):
             np.testing.assert_array_equal(exported, samples * 2)
             self.assertEqual(stats["valid_bytes"], samples.nbytes)
             self.assertEqual(stats["samples"], 4)
+            self.assertEqual(stats["capture_blocks_dropped"], 2)
+            self.assertEqual(stats["silence_blocks_inserted"], 3)
+            self.assertEqual(stats["audio_gap_events"], 2)
+            self.assertEqual(stats["max_audio_gap_blocks"], 3)
 
 
 if __name__ == "__main__":

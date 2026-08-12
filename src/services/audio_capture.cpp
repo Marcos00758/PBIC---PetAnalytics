@@ -35,6 +35,7 @@ bool AudioCaptureSink::pop(AudioPcmBlock& block) {
     return false;
   }
   block.timestampUs = queue_[tail].timestampUs;
+  block.sequence = queue_[tail].sequence;
   memcpy(block.samples, queue_[tail].samples, sizeof(block.samples));
   __disable_irq();
   tail_ = static_cast<uint16_t>((tail + 1U) % config::kMicrophoneQueueBlocks);
@@ -70,10 +71,12 @@ void AudioCaptureSink::prepareForRecording() {
   blocksReceived_ = 0;
   blocksDropped_ = 0;
   incompleteBlocks_ = 0;
+  blockSequence_ = 0;
   __enable_irq();
 }
 
 void AudioCaptureSink::update() {
+  const uint32_t sequence = blockSequence_++;
   audio_block_t* left = receiveReadOnly(0);
   if (left == nullptr) {
     ++incompleteBlocks_;
@@ -91,6 +94,7 @@ void AudioCaptureSink::update() {
     ++blocksDropped_;
   } else {
     queue_[head_].timestampUs = micros() - kAudioBlockDurationUs;
+    queue_[head_].sequence = sequence;
     memcpy(queue_[head_].samples, left->data, sizeof(queue_[head_].samples));
     head_ = nextHead;
     const uint16_t count = queueCount(head_, tail_);

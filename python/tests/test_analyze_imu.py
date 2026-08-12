@@ -11,6 +11,7 @@ from analyze_imu import (
     analyze_file,
     calculate_timing,
     format_validation,
+    format_sensor_diagnostics,
     load_gyro_range_dps,
     plot_capture,
 )
@@ -64,6 +65,16 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertEqual(len(packets), 3)
         self.assertIsNotNone(timing)
         self.assertEqual(diagnostics.accel_near_limit, (0, 0, 0))
+
+    def test_empty_capture_reports_unavailable_bmp_ranges(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.bin"
+            path.write_bytes(b"")
+            _, _, timing, diagnostics = analyze_file(path)
+
+        report = format_sensor_diagnostics(diagnostics, timing)
+        self.assertIn("bmp0_raw pressure=unavailable", report)
+        self.assertNotIn("4294967295..0", report)
 
     def test_preserves_v3_gyro_scale_from_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

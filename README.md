@@ -37,7 +37,10 @@ O formato completo está em
 
 O ICS43434 e capturado pelo DMA da biblioteca `Audio` oficial da Teensy em
 PCM mono `int16`, 44100 Hz, canal esquerdo. Cada sessao mantem `imu.bin` e
-`audio.raw` abertos simultaneamente, com filas RAM independentes. O arquivo de
+`audio.raw` abertos simultaneamente, com filas RAM independentes. A fila DMA
+mantem ate 511 blocos uteis e cada bloco possui sequencia interna. Se houver
+perda, o firmware insere silencio equivalente no arquivo e registra o evento,
+preservando a duracao e o alinhamento das amostras seguintes. O arquivo de
 audio nao possui cabecalho; os parametros e o timestamp estimado da primeira
 amostra ficam em `meta.txt`. Antes da sessao, dois segundos em silencio sao
 avaliados em RAM. Nivel alto, DC ou clipping acima do esperado geram
@@ -58,8 +61,11 @@ escrita, o firmware emite
 pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
 e só é controlado depois que o SPI foi encerrado com segurança.
 
-Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz,
-`imu.bin` e `audio.raw` usam blocos de 512 bytes. Cada pasta possui
+Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz.
+`imu.bin` e `audio.raw` usam blocos completos de 512 bytes durante a gravacao;
+fragmentos finais sao permitidos somente no fechamento. Flushes independentes
+nao drenam as filas, e o audio recebe prioridade quando sua ocupacao passa de
+50%. Cada pasta possui
 `journal.txt`, com os tamanhos confirmados dos dois fluxos. Uma queda de
 energia pode deixar uma cauda prealocada, mas o Python ignora automaticamente
 os bytes posteriores ao journal. Para mudar o teste de cinco minutos para uma

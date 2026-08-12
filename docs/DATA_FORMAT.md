@@ -162,9 +162,11 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 `imu.bin` contem exatamente a concatenacao dos mesmos pacotes v4 de 79 bytes
 usados no stream USB, sem cabecalho e sem mensagens textuais. O arquivo fica
 aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
-dos pacotes das escritas de ate 512 bytes; ha flush a cada 1000 pacotes. O
-audio possui fila separada de 32768 bytes e e escrito em blocos de ate 512
-bytes. Em cada passagem do loop ocorre no maximo uma escrita ao SD. Um
+dos pacotes das escritas. O audio possui fila SD separada de 32768 bytes e uma
+fila DMA com 511 blocos uteis. Durante a operacao normal, ambos os arquivos sao
+escritos somente em blocos completos de 512 bytes; uma escrita parcial pode
+ocorrer apenas no fim da sessao. Em cada passagem do loop ocorre no maximo uma
+operacao ao SD. Um
 desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
 
 `audio.raw` contem PCM mono assinado de 16 bits, little-endian, sem cabecalho,
@@ -215,6 +217,9 @@ audio_sample_rate_hz=44100
 audio_channels=1
 audio_bits_per_sample=16
 audio_block_samples=128
+audio_capture_queue_usable_blocks=511
+audio_gap_policy=zero_fill
+audio_gap_detection=audio_dma_block_sequence
 audio_start_timestamp_valid=1
 audio_start_timestamp_us=<micros estimado da primeira amostra>
 audio_preflight_valid=1
@@ -257,13 +262,19 @@ session=1
 uptime_ms=<tempo do ultimo checkpoint>
 imu_valid_bytes=<prefixo confirmado de imu.bin>
 audio_valid_bytes=<prefixo confirmado de audio.raw>
+audio_silence_blocks_inserted=<blocos zerados no prefixo>
+audio_gap_events=<eventos de perda detectados>
+audio_max_gap_blocks=<maior evento em blocos de 128 amostras>
 audio_start_timestamp_valid=1
 audio_start_timestamp_us=<timestamp do primeiro bloco desta pasta>
 imu_preallocated_bytes=<tamanho reservado>
 audio_preallocated_bytes=<tamanho reservado>
 ```
 
-O primeiro checkpoint util ocorre apos aproximadamente dez segundos e os
+Os tamanhos publicados correspondem apenas ao prefixo confirmado por `sync()`;
+podem ficar temporariamente atras dos contadores de bytes escritos, mas nunca
+apontam deliberadamente para uma fila ainda nao sincronizada. O primeiro
+checkpoint util ocorre apos aproximadamente dez segundos e os
 seguintes a cada 30 segundos. `python/parse_data.py` e
 `python/analyze_imu.py` aplicam `imu_valid_bytes` automaticamente.
 `python/export_audio.py` usa `audio_valid_bytes` e gera um WAV sem a cauda.
@@ -285,6 +296,15 @@ de captura, blocos incompletos, maior ocupacao da fila, blocos aceitos ou
 descartados pelo buffer do SD, bytes escritos, tentativas e falhas. As maiores
 latencias e quantidades de escritas e flushes acima de 10 ms sao separadas das
 metricas de `imu.bin`.
+
+Cada bloco DMA possui uma sequencia interna que nao entra em `audio.raw`. Um
+salto de sequencia representa amostras irrecuperaveis; o logger insere zeros no
+lugar para que o indice seguinte continue no tempo correto. `status.txt`
+registra `sd_audio_silence_blocks_inserted`, `sd_audio_gap_events` e
+`sd_audio_max_gap_blocks`. Cada bloco corresponde a 128 amostras. Tambem sao
+registrados `sd_partial_writes`, `sd_audio_partial_writes`, ocupacao maxima das
+filas e quantas vezes o audio recebeu prioridade. `python/export_audio.py`
+exibe os contadores de gap junto das estatisticas do WAV.
 
 Quando uma falha e confirmada, a Serial emite `SD_ERROR_STATE` com tentativas,
 sucessos, falhas, bytes ainda em cada buffer, idade da falha e maior duracao de

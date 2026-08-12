@@ -359,6 +359,12 @@ def load_session_journal(input_path: Path) -> dict[str, str]:
     return load_key_value_file(session / "journal.txt")
 
 
+def load_session_status(input_path: Path) -> dict[str, str]:
+    """Load final or latest SD logger counters for a session."""
+    session = input_path if input_path.is_dir() else input_path.parent
+    return load_key_value_file(session / "status.txt")
+
+
 def _validated_journal_size(path: Path, encoded: str | None) -> int | None:
     if encoded is None:
         return None

@@ -30,6 +30,7 @@ struct SdLoggerCounters {
   uint32_t writeAttempts = 0;
   uint32_t writeSuccesses = 0;
   uint32_t writeFailures = 0;
+  uint32_t partialWrites = 0;
   uint32_t flushes = 0;
   uint32_t maxWriteDurationUs = 0;
   uint32_t maxFlushDurationUs = 0;
@@ -37,17 +38,24 @@ struct SdLoggerCounters {
   uint32_t slowWrites = 0;
   uint32_t slowFlushes = 0;
   uint32_t slowStatusUpdates = 0;
+  uint32_t maxBufferedBytes = 0;
   uint32_t audioBlocksQueued = 0;
   uint32_t audioBlocksDropped = 0;
+  uint32_t audioSilenceBlocksInserted = 0;
+  uint32_t audioGapEvents = 0;
+  uint32_t maxAudioGapBlocks = 0;
   uint32_t audioBytesWritten = 0;
   uint32_t audioWriteAttempts = 0;
   uint32_t audioWriteSuccesses = 0;
   uint32_t audioWriteFailures = 0;
+  uint32_t audioPartialWrites = 0;
+  uint32_t audioPriorityWrites = 0;
   uint32_t audioFlushes = 0;
   uint32_t maxAudioWriteDurationUs = 0;
   uint32_t maxAudioFlushDurationUs = 0;
   uint32_t slowAudioWrites = 0;
   uint32_t slowAudioFlushes = 0;
+  uint32_t maxAudioBufferedBytes = 0;
   uint32_t journalUpdates = 0;
   uint32_t maxJournalDurationUs = 0;
   uint32_t slowJournalUpdates = 0;
@@ -84,6 +92,17 @@ class SdLogger {
   const SdLoggerCounters& counters() const { return counters_; }
 
  private:
+  enum class FinalizeStage : uint8_t {
+    kIdle,
+    kFlushImu,
+    kFlushAudio,
+    kTruncateImu,
+    kTruncateAudio,
+    kJournal,
+    kStatus,
+    kCloseAndRotate,
+  };
+
   bool verifyReadWrite();
   bool chooseSessionNumber();
   bool persistSessionNumber();
@@ -94,8 +113,11 @@ class SdLogger {
   bool writeStatus(const AcquisitionCounters& acquisitionCounters,
                    const AudioCaptureCounters& audioCounters,
                    const char* state);
+  bool appendAudioSamples(const int16_t* samples);
   bool writeBufferedBytes(bool allowPartialBlock);
   bool writeAudioBufferedBytes(bool allowPartialBlock);
+  bool flushImuFile();
+  bool flushAudioFile();
   void discardEmptyPreallocation();
   void advanceBuffer(size_t count);
   void advanceAudioBuffer(size_t count);
@@ -112,6 +134,10 @@ class SdLogger {
   FsFile audioFile_;
   uint8_t buffer_[config::kSdRamBufferBytes]{};
   uint8_t audioBuffer_[config::kSdAudioRamBufferBytes]{};
+  uint8_t writeScratch_[config::kSdImuWriteBlockBytes >
+                                config::kSdAudioWriteBlockBytes
+                            ? config::kSdImuWriteBlockBytes
+                            : config::kSdAudioWriteBlockBytes]{};
   size_t bufferHead_ = 0;
   size_t bufferTail_ = 0;
   size_t bufferedBytes_ = 0;
@@ -123,6 +149,16 @@ class SdLogger {
   uint32_t packetsAtLastFlush_ = 0;
   uint32_t packetsAtLastJournal_ = 0;
   uint32_t packetsAtLastStatus_ = 0;
+  uint32_t imuDurableBytes_ = 0;
+  uint32_t audioDurableBytes_ = 0;
+  uint32_t nextAudioSequence_ = 0;
+  bool audioSequenceInitialized_ = false;
+  bool audioGapInProgress_ = false;
+  bool imuFlushPending_ = false;
+  bool audioFlushPending_ = false;
+  bool journalPending_ = false;
+  bool statusPending_ = false;
+  FinalizeStage finalizeStage_ = FinalizeStage::kIdle;
   uint32_t nextWriteRetryMs_ = 0;
   uint32_t imuWriteFailureStartedMs_ = 0;
   uint32_t audioWriteFailureStartedMs_ = 0;
@@ -134,6 +170,7 @@ class SdLogger {
   bool failureIndicatorReady_ = false;
   uint32_t failureConfirmedAtMs_ = 0;
   uint32_t sessionStartedMs_ = 0;
+  uint32_t stopRequestedAtMs_ = 0;
   uint64_t freeBytesAtBoot_ = 0;
   uint64_t recordingBudgetBytes_ = 0;
   uint32_t estimatedRecordingSeconds_ = 0;
@@ -144,6 +181,7 @@ class SdLogger {
   bool stopRequested_ = false;
   const char* stopReason_ = nullptr;
   SdSessionMetadata sessionMetadata_{};
+  AudioCaptureCounters audioCountersAtSessionStart_{};
   SdLoggerCounters counters_{};
 };
 

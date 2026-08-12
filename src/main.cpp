@@ -32,6 +32,8 @@ pet::drivers::Ics43434Diagnostic microphoneDiagnostic;
 pet::services::AudioCapture audioCapture;
 
 bool acquisitionReady = false;
+pet::services::AudioPcmBlock pendingAudioBlock{};
+bool audioBlockPending = false;
 
 void printHexByte(uint8_t value) {
   if (value < 0x10) {
@@ -344,9 +346,17 @@ void loop() {
     }
   }
 
-  pet::services::AudioPcmBlock audioBlock{};
-  while (sdLogger.canEnqueueAudioBlock() && audioCapture.pop(audioBlock)) {
-    sdLogger.enqueueAudio(audioBlock);
+  while (sdLogger.canEnqueueAudioBlock()) {
+    if (!audioBlockPending) {
+      if (!audioCapture.pop(pendingAudioBlock)) {
+        break;
+      }
+      audioBlockPending = true;
+    }
+    if (!sdLogger.enqueueAudio(pendingAudioBlock)) {
+      break;
+    }
+    audioBlockPending = false;
   }
   sdLogger.service(acquisition.counters(), audioCapture.counters());
 }

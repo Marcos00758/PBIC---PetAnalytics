@@ -10,14 +10,14 @@ constexpr bool kMicrophoneDiagnosticEnabled = false;
 constexpr bool kMicrophoneRecordingEnabled = true;
 constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
 constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
-constexpr uint16_t kMicrophoneQueueBlocks = 128;
+constexpr uint16_t kMicrophoneQueueBlocks = 512;
 constexpr uint32_t kMicrophoneSampleRateHz = 44100;
 constexpr uint16_t kMicrophoneBlockSamples = 128;
 constexpr uint8_t kMicrophoneChannels = 1;
 constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.4.1";
+constexpr char kFirmwareVersion[] = "0.4.2";
 
 constexpr size_t kSdRamBufferBytes = 8192;
 constexpr size_t kSdAudioRamBufferBytes = 32768;
@@ -39,6 +39,7 @@ constexpr uint32_t kSdFailureLedCycleMs = 1200;
 constexpr uint32_t kSdFailureLedPulseMs = 150;
 constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
 constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
+constexpr uint8_t kSdAudioUrgentPercent = 50;
 static_assert(kSdRamBufferBytes % kSdImuWriteBlockBytes == 0,
               "SD RAM buffer must contain complete write blocks");
 static_assert(kSdAudioRamBufferBytes % kSdAudioWriteBlockBytes == 0,

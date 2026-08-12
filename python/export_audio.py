@@ -9,7 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from parse_data import load_session_metadata, valid_audio_bytes
+from parse_data import (
+    load_session_journal,
+    load_session_metadata,
+    load_session_status,
+    valid_audio_bytes,
+)
 
 DEFAULT_CHUNK_BYTES = 64 * 1024
 
@@ -21,6 +26,8 @@ def export_audio(
 ) -> dict[str, float | int]:
     audio_path = input_path / "audio.raw" if input_path.is_dir() else input_path
     metadata = load_session_metadata(audio_path)
+    journal = load_session_journal(audio_path)
+    status = load_session_status(audio_path)
     sample_rate = int(metadata.get("audio_sample_rate_hz", "44100"))
     channels = int(metadata.get("audio_channels", "1"))
     bits = int(metadata.get("audio_bits_per_sample", "16"))
@@ -71,6 +78,26 @@ def export_audio(
         "peak_safe_gain_db": safe_gain_db,
         "gain_db": gain_db,
         "output_clipped_samples": output_clipped,
+        "capture_blocks_dropped": int(
+            status.get("audio_capture_blocks_dropped", "0")
+        ),
+        "silence_blocks_inserted": int(
+            journal.get(
+                "audio_silence_blocks_inserted",
+                status.get("sd_audio_silence_blocks_inserted", "0"),
+            )
+        ),
+        "audio_gap_events": int(
+            journal.get(
+                "audio_gap_events", status.get("sd_audio_gap_events", "0")
+            )
+        ),
+        "max_audio_gap_blocks": int(
+            journal.get(
+                "audio_max_gap_blocks",
+                status.get("sd_audio_max_gap_blocks", "0"),
+            )
+        ),
     }
 
 

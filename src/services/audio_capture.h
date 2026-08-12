@@ -9,6 +9,7 @@ namespace pet::services {
 
 struct AudioPcmBlock {
   uint32_t timestampUs = 0;
+  uint32_t sequence = 0;
   int16_t samples[config::kMicrophoneBlockSamples];
 };
 
@@ -52,6 +53,7 @@ class AudioCaptureSink : public AudioStream {
   volatile uint32_t blocksReceived_ = 0;
   volatile uint32_t blocksDropped_ = 0;
   volatile uint32_t incompleteBlocks_ = 0;
+  volatile uint32_t blockSequence_ = 0;
   volatile uint32_t firstSampleTimestampUs_ = 0;
 };
 
