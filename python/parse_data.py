@@ -20,6 +20,10 @@ ACCEL_MPS2_PER_COUNT = (8.0 * 9.80665) / 32767.5
 DEFAULT_GYRO_RANGE_DPS = 2000.0
 MAG_UT_PER_COUNT = 0.15
 BMP390_NVM_LENGTH = 21
+JOURNAL_MAGIC = 0x4A50
+JOURNAL_VERSION = 1
+JOURNAL_STRUCT = struct.Struct("<HBBIIQQ3xB")
+JOURNAL_STATE_NAMES = {1: "recording", 2: "stopped", 3: "completed"}
 
 
 @dataclass(frozen=True)
@@ -336,6 +340,20 @@ def elapsed_us(start_timestamp: int, end_timestamp: int) -> int:
     return (end_timestamp - start_timestamp) & 0xFFFFFFFF
 
 
+def accumulated_elapsed_us(timestamps: Iterable[int]) -> int:
+    """Accumulate adjacent uint32 timestamps across any number of rollovers."""
+    iterator = iter(timestamps)
+    previous = next(iterator, None)
+    if previous is None:
+        return 0
+
+    total = 0
+    for current in iterator:
+        total += elapsed_us(previous, current)
+        previous = current
+    return total
+
+
 def load_key_value_file(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
@@ -354,8 +372,31 @@ def load_session_metadata(input_path: Path) -> dict[str, str]:
 
 
 def load_session_journal(input_path: Path) -> dict[str, str]:
-    """Load the last committed sizes for a preallocated SD session."""
+    """Load the newest valid binary checkpoint, with legacy text fallback."""
     session = input_path if input_path.is_dir() else input_path.parent
+    binary_path = session / "journal.bin"
+    latest: dict[str, str] = {}
+    if binary_path.exists():
+        with binary_path.open("rb") as stream:
+            while record := stream.read(JOURNAL_STRUCT.size):
+                if len(record) != JOURNAL_STRUCT.size:
+                    break
+                unpacked = JOURNAL_STRUCT.unpack(record)
+                if (
+                    unpacked[0] != JOURNAL_MAGIC
+                    or unpacked[1] != JOURNAL_VERSION
+                    or crc8(record[:-1]) != record[-1]
+                ):
+                    continue
+                latest = {
+                    "state": JOURNAL_STATE_NAMES.get(unpacked[2], "unknown"),
+                    "journal_sequence": str(unpacked[3]),
+                    "uptime_ms": str(unpacked[4]),
+                    "imu_valid_bytes": str(unpacked[5]),
+                    "audio_valid_bytes": str(unpacked[6]),
+                }
+        if latest:
+            return latest
     return load_key_value_file(session / "journal.txt")
 
 
@@ -403,15 +444,15 @@ def load_bmp390_calibrations(
 
 
 def summarize(packets: list[ParsedPacket], stats: ParseStats) -> str:
-    first_timestamp = packets[0].packet.timestamp_us if packets else None
-    last_timestamp = packets[-1].packet.timestamp_us if packets else None
-    return summarize_timestamps(stats, first_timestamp, last_timestamp)
+    duration_us = accumulated_elapsed_us(
+        item.packet.timestamp_us for item in packets
+    )
+    return summarize_timestamps(stats, duration_us if len(packets) >= 2 else None)
 
 
 def summarize_timestamps(
     stats: ParseStats,
-    first_timestamp: int | None,
-    last_timestamp: int | None,
+    duration_us: int | None,
 ) -> str:
     lines = [
         f"packet_size={PACKET_SIZE}",
@@ -421,8 +462,7 @@ def summarize_timestamps(
         f"trailing_bytes={stats.trailing_bytes}",
         f"sequence_gaps={stats.sequence_gaps}",
     ]
-    if stats.valid_packets >= 2 and first_timestamp is not None and last_timestamp is not None:
-        duration_us = elapsed_us(first_timestamp, last_timestamp)
+    if stats.valid_packets >= 2 and duration_us is not None:
         sample_rate = (stats.valid_packets - 1) * 1_000_000 / duration_us if duration_us else 0
         lines.extend(
             (f"timestamp_span_s={duration_us / 1_000_000:.6f}",
@@ -437,13 +477,16 @@ def main() -> None:
     args = parser.parse_args()
 
     stats = ParseStats()
-    first_timestamp = None
-    last_timestamp = None
+    previous_timestamp = None
+    duration_us = 0
     for parsed in iter_file_packets(args.input, stats):
-        if first_timestamp is None:
-            first_timestamp = parsed.packet.timestamp_us
-        last_timestamp = parsed.packet.timestamp_us
-    print(summarize_timestamps(stats, first_timestamp, last_timestamp))
+        timestamp = parsed.packet.timestamp_us
+        if previous_timestamp is not None:
+            duration_us += elapsed_us(previous_timestamp, timestamp)
+        previous_timestamp = timestamp
+    print(summarize_timestamps(
+        stats, duration_us if stats.valid_packets >= 2 else None
+    ))
 
 
 if __name__ == "__main__":

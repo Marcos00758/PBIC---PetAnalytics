@@ -50,6 +50,21 @@ class CaptureSerialTest(unittest.TestCase):
         self.assertEqual([item.packet.sequence for item in packets], [1, 2])
         self.assertEqual(stats.sequence_gaps, 0)
 
+    def test_accumulates_sensor_time_across_rollover(self):
+        stream = b"".join(
+            make_packet(timestamp, sequence)
+            for timestamp, sequence in (
+                (0xFFFFF000, 1),
+                (0x00001710, 2),
+                (0x00003E20, 3),
+                (0x00006530, 4),
+            )
+        )
+        raw, first_timestamp = capture_sensor_window(FakeSerial(stream), 0.02)
+        packets, _ = parse_stream(raw)
+        self.assertEqual(first_timestamp, 0xFFFFF000)
+        self.assertEqual([item.packet.sequence for item in packets], [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

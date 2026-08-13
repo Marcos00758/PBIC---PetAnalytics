@@ -321,8 +321,14 @@ def plot_capture(
             "pip install -r python/requirements.txt"
         ) from exc
 
-    first_timestamp = packets[0].packet.timestamp_us
-    times_s = [elapsed_us(first_timestamp, item.packet.timestamp_us) / 1_000_000 for item in packets]
+    times_s = []
+    elapsed = 0
+    previous_timestamp = None
+    for item in packets:
+        if previous_timestamp is not None:
+            elapsed += elapsed_us(previous_timestamp, item.packet.timestamp_us)
+        times_s.append(elapsed / 1_000_000)
+        previous_timestamp = item.packet.timestamp_us
     physical = [
         item.packet.physical_values(mag_calibrations, gyro_range_dps)
         for item in packets

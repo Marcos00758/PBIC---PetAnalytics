@@ -130,6 +130,13 @@ BMP ou mag preserva o ultimo cache valido e incrementa contador proprio.
 Os contadores de aquisicao nao entram no pacote. Eles sao persistidos
 periodicamente em `status.txt` pelo logger do SD.
 
+`timestamp_us` retorna a zero a cada `2^32` microssegundos, aproximadamente
+71,6 minutos. O firmware compara deadlines por subtracao modular de `uint32` e
+possui verificacoes de compilacao antes e depois do rollover. O Python nao
+subtrai apenas o primeiro timestamp do ultimo: ele acumula os intervalos entre
+pacotes consecutivos, preservando a duracao de sessoes com multiplos
+rollovers.
+
 ## Volume, captura e arquivos longos
 
 A 100 Hz, o fluxo nominal e de 7900 bytes/s. Uma janela de 10 segundos sem
@@ -154,7 +161,7 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 /session.txt
 /S001/imu.bin
 /S001/meta.txt
-/S001/journal.txt
+/S001/journal.bin
 /S001/status.txt
 ```
 
@@ -189,9 +196,14 @@ sd_rotate_sessions=0
 sd_preallocation_margin_seconds=1
 imu_preallocated_bytes=4747900
 journal_update_packets=1000
+journal_file=journal.bin
+journal_record_version=1
+journal_record_size=32
+journal_magic=0x4A50
+journal_crc=CRC-8 polynomial 0x07
 audio_enabled=0
 preallocation_enabled=1
-preallocation_tail_source=journal.txt
+preallocation_tail_source=journal.bin
 bmp0_nvm_valid=1
 bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1
@@ -211,15 +223,21 @@ A prealocacao SdFat esta habilitada somente para `imu.bin`. Se houver
 desligamento abrupto, o arquivo pode manter a cauda reservada; ela nao deve ser
 interpretada como dado real.
 
-`journal.txt` e ASCII `chave=valor` e contem:
+`journal.bin` permanece aberto durante a sessao e recebe um registro append-only
+de 32 bytes logo apos cada `sync()` bem-sucedido de `imu.bin`. O arquivo nao e
+prealocado. Cada registro usa little-endian:
 
-```text
-state=recording
-session=1
-uptime_ms=<tempo do ultimo checkpoint>
-imu_valid_bytes=<prefixo confirmado de imu.bin>
-imu_preallocated_bytes=<tamanho reservado>
-```
+| Offset | Tamanho | Tipo | Campo | Descricao |
+|---:|---:|---|---|---|
+| 0 | 2 | `uint16` | `magic` | `0x4A50` |
+| 2 | 1 | `uint8` | `version` | `1` |
+| 3 | 1 | `uint8` | `state` | 1 gravando, 2 parado, 3 completo |
+| 4 | 4 | `uint32` | `sequence` | Numero crescente do checkpoint |
+| 8 | 4 | `uint32` | `uptime_ms` | `millis()` no checkpoint |
+| 12 | 8 | `uint64` | `imu_valid_bytes` | Prefixo confirmado de `imu.bin` |
+| 20 | 8 | `uint64` | `audio_valid_bytes` | Zero no firmware IMU-only |
+| 28 | 3 | bytes | `reserved` | Reservado, preenchido com zero |
+| 31 | 1 | `uint8` | `crc8` | CRC-8 dos bytes 0 a 30 |
 
 Os tamanhos publicados correspondem apenas ao prefixo confirmado por `sync()`;
 podem ficar temporariamente atras dos contadores de bytes escritos, mas nunca
@@ -227,6 +245,8 @@ apontam deliberadamente para uma fila ainda nao sincronizada. O primeiro
 checkpoint util ocorre apos aproximadamente dez segundos e os
 seguintes a cada dez segundos. `python/parse_data.py` e
 `python/analyze_imu.py` aplicam `imu_valid_bytes` automaticamente.
+O parser percorre todos os registros e usa o ultimo com magic, versao e CRC
+validos. Sessoes antigas com apenas `journal.txt` continuam suportadas.
 
 `status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
 minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,

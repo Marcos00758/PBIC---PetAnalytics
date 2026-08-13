@@ -85,6 +85,8 @@ def capture_sensor_window(
 ) -> tuple[bytes, int]:
     raw = synchronize(port)
     first_timestamp: int | None = None
+    previous_timestamp: int | None = None
+    sensor_elapsed_us = 0
     scan_offset = 0
     duration_us = round(duration_seconds * 1_000_000)
     host_deadline = time.monotonic() + duration_seconds + CAPTURE_TIMEOUT_MARGIN_SECONDS
@@ -99,8 +101,13 @@ def capture_sensor_window(
 
             if first_timestamp is None:
                 first_timestamp = packet.timestamp_us
-            elif elapsed_us(first_timestamp, packet.timestamp_us) >= duration_us:
-                return bytes(raw[:scan_offset]), first_timestamp
+            elif previous_timestamp is not None:
+                sensor_elapsed_us += elapsed_us(
+                    previous_timestamp, packet.timestamp_us
+                )
+                if sensor_elapsed_us >= duration_us:
+                    return bytes(raw[:scan_offset]), first_timestamp
+            previous_timestamp = packet.timestamp_us
             scan_offset += PACKET_SIZE
         raw.extend(read_available(port))
 

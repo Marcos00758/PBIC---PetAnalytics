@@ -1,6 +1,7 @@
 #include "services/imu_acquisition.h"
 
 #include "utils/packet.h"
+#include "utils/time_utils.h"
 
 namespace pet::services {
 namespace {
@@ -54,11 +55,12 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
   }
 
   const uint32_t nowUs = micros();
-  if (static_cast<int32_t>(nowUs - nextSampleUs_) < 0) {
+  if (!utils::deadlineReached(nowUs, nextSampleUs_)) {
     return false;
   }
 
-  const uint32_t latePeriods = (nowUs - nextSampleUs_) / samplePeriodUs_;
+  const uint32_t latePeriods =
+      utils::elapsedMicros(nextSampleUs_, nowUs) / samplePeriodUs_;
   counters_.missedScheduleReadings += latePeriods;
   sequence_ = static_cast<uint16_t>(sequence_ + latePeriods);
   nextSampleUs_ += (latePeriods + 1U) * samplePeriodUs_;

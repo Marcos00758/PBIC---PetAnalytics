@@ -5,6 +5,7 @@
 
 #include "config/constants.h"
 #include "data/imu_packet.h"
+#include "data/sd_journal.h"
 #include "drivers/bmp390.h"
 #include "services/audio_capture.h"
 #include "services/imu_acquisition.h"
@@ -156,6 +157,7 @@ class SdLogger {
 
   FsFile imuFile_;
   FsFile audioFile_;
+  FsFile journalFile_;
   uint8_t buffer_[config::kSdRamBufferBytes]{};
   uint8_t audioBuffer_[config::kSdAudioRamBufferBytes]{};
   uint8_t writeScratch_[config::kSdImuWriteBlockBytes >
@@ -173,6 +175,7 @@ class SdLogger {
   uint32_t packetsAtLastFlush_ = 0;
   uint32_t packetsAtLastJournal_ = 0;
   uint32_t packetsAtLastStatus_ = 0;
+  uint32_t journalSequence_ = 0;
   uint64_t imuDurableBytes_ = 0;
   uint32_t audioDurableBytes_ = 0;
   uint32_t nextAudioSequence_ = 0;

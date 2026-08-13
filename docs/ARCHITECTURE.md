@@ -91,13 +91,13 @@ PBIC/
 /S001/
 ├── imu.bin
 ├── meta.txt
-├── journal.txt
+├── journal.bin
 └── status.txt
 
 session.txt: Fica na raiz do cartão e guarda o número da última sessão
 imu.bin: Contém os pacotes binários das IMUs e barômetros.
 meta.txt: Descreve a sessão e a configuração.
-journal.txt: Guarda o prefixo de imu.bin confirmado no SD.
+journal.bin: Guarda checkpoints binarios append-only com CRC.
 status.txt: Guarda contadores e latências do firmware.
 
 "Exemplo:
@@ -157,8 +157,11 @@ maximas do cartao continuam sendo medidas.
 Flush nao drena a fila. `imu.bin` recebe `sync()` a cada 1000 pacotes, cerca de
 dez segundos, somente quando ha no maximo 1024 bytes aguardando. O journal e
 atualizado logo depois e publica apenas os bytes confirmados pelo ultimo
-`sync()` bem-sucedido. `status.txt` registra as escolhas do caminho IMU e as
-operacoes de manutencao.
+`sync()` bem-sucedido. `journal.bin` permanece aberto e recebe registros fixos
+de 32 bytes por append, sem criar, remover ou renomear arquivos durante a
+aquisicao. Um CRC-8 permite ao Python ignorar um ultimo registro incompleto ou
+corrompido. `status.txt` registra as escolhas do caminho IMU e as operacoes de
+manutencao.
 
 A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
 de progresso inicia um período de dois segundos; qualquer escrita posterior
@@ -216,6 +219,11 @@ O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
 sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
 `src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
 com o Python está documentado em `docs/DATA_FORMAT.md`.
+
+`src/utils/time_utils.h` centraliza a aritmetica modular de `micros()` e inclui
+`static_assert` cobrindo deadlines antes e depois do retorno de `uint32` a
+zero. As ferramentas Python acumulam deltas consecutivos para representar
+sessoes que atravessam mais de um rollover de aproximadamente 71,6 minutos.
 
 ## Diagnóstico inicial dos AK09916
 

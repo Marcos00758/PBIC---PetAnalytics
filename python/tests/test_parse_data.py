@@ -8,17 +8,23 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from parse_data import (
+    JOURNAL_MAGIC,
+    JOURNAL_STRUCT,
+    JOURNAL_VERSION,
     MAGIC,
     PACKET_SIZE,
     PACKET_STRUCT,
     MagnetometerCalibration,
     ParseStats,
+    accumulated_elapsed_us,
     crc8,
     iter_binary_packets,
     iter_file_packets,
     load_bmp390_calibrations,
+    load_session_journal,
     load_session_metadata,
     parse_stream,
+    summarize,
     valid_audio_bytes,
 )
 
@@ -78,6 +84,22 @@ class ParseDataTest(unittest.TestCase):
         raw = make_packet(sequence=0xFFFF) + make_packet(sequence=1)
         _, stats = parse_stream(raw)
         self.assertEqual(stats.sequence_gaps, 1)
+
+    def test_accumulates_multiple_timestamp_rollovers(self):
+        timestamps = (0xF0000000, 0x40000000, 0x90000000, 0xE0000000,
+                      0x30000000, 0x80000000)
+        self.assertEqual(
+            accumulated_elapsed_us(timestamps),
+            5 * 0x50000000,
+        )
+
+        raw = b"".join(
+            make_packet(timestamp_us=timestamp, sequence=index)
+            for index, timestamp in enumerate(timestamps)
+        )
+        packets, stats = parse_stream(raw)
+        report = summarize(packets, stats)
+        self.assertIn("timestamp_span_s=6710.886400", report)
 
     def test_streams_packets_across_chunk_boundaries(self):
         raw = b"log" + make_packet(sequence=1) + make_packet(sequence=3) + b"tail"
@@ -148,6 +170,42 @@ class ParseDataTest(unittest.TestCase):
             self.assertEqual(stats.discarded_bytes, 0)
             self.assertEqual(stats.trailing_bytes, 0)
             self.assertEqual(valid_audio_bytes(audio_path), 4)
+
+    def test_uses_last_valid_binary_journal_record(self):
+        def journal_record(sequence: int, imu_bytes: int) -> bytes:
+            encoded = JOURNAL_STRUCT.pack(
+                JOURNAL_MAGIC,
+                JOURNAL_VERSION,
+                1,
+                sequence,
+                1234,
+                imu_bytes,
+                0,
+                0,
+            )
+            return encoded[:-1] + bytes((crc8(encoded[:-1]),))
+
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            packet = make_packet(sequence=12)
+            imu_path = session / "imu.bin"
+            imu_path.write_bytes(packet * 3 + bytes(4096))
+            damaged = bytearray(journal_record(2, len(packet) * 3))
+            damaged[8] ^= 0x01
+            (session / "journal.bin").write_bytes(
+                journal_record(0, len(packet))
+                + journal_record(1, len(packet) * 2)
+                + bytes(damaged)
+                + b"partial"
+            )
+
+            stats = ParseStats()
+            packets = list(iter_file_packets(imu_path, stats))
+            journal = load_session_journal(imu_path)
+
+        self.assertEqual(len(packets), 2)
+        self.assertEqual(journal["journal_sequence"], "1")
+        self.assertEqual(journal["imu_valid_bytes"], str(len(packet) * 2))
 
 
 if __name__ == "__main__":

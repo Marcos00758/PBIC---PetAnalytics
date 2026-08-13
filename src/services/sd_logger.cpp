@@ -6,6 +6,7 @@
 
 #include "config/constants.h"
 #include "config/pins.h"
+#include "utils/crc8.h"
 
 namespace pet::services {
 namespace {
@@ -57,6 +58,16 @@ void printIndexedCounters(File& file, const char* prefix,
     file.print('=');
     file.println(values[i]);
   }
+}
+
+data::SdJournalState journalState(const char* state) {
+  if (strcmp(state, "recording") == 0) {
+    return data::SdJournalState::kRecording;
+  }
+  if (strcmp(state, "completed_duration") == 0) {
+    return data::SdJournalState::kCompleted;
+  }
+  return data::SdJournalState::kStopped;
 }
 
 }  // namespace
@@ -161,6 +172,7 @@ bool SdLogger::beginSession(
   packetsAtLastFlush_ = 0;
   packetsAtLastJournal_ = 0;
   packetsAtLastStatus_ = 0;
+  journalSequence_ = 0;
   imuDurableBytes_ = 0;
   audioDurableBytes_ = 0;
   audioSequenceInitialized_ = false;
@@ -523,6 +535,13 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(imuPreallocatedBytes_);
   file.print("journal_update_packets=");
   file.println(config::kSdPacketsPerJournalUpdate);
+  file.println("journal_file=journal.bin");
+  file.print("journal_record_version=");
+  file.println(data::kSdJournalVersion);
+  file.print("journal_record_size=");
+  file.println(sizeof(data::SdJournalRecord));
+  file.println("journal_magic=0x4A50");
+  file.println("journal_crc=CRC-8 polynomial 0x07");
   file.print("sd_scheduler_imu_reserved_capacity_bytes=");
   file.println(config::kSdImuReservedCapacityBytes);
   file.print("sd_maintenance_max_imu_buffered_bytes=");
@@ -571,7 +590,7 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
     file.println(metadata.audioStartTimestampUs);
   }
   file.println("preallocation_enabled=1");
-  file.println("preallocation_tail_source=journal.txt");
+  file.println("preallocation_tail_source=journal.bin");
   file.print("icm0_channel=");
   file.println(config::kIcm0Channel);
   file.print("icm1_channel=");
@@ -636,8 +655,11 @@ bool SdLogger::hasSpaceForNextSession() {
 
 bool SdLogger::openAndPreallocateDataFiles() {
   char imuPath[32]{};
+  char journalPath[32]{};
   buildPath(imuPath, sizeof(imuPath), "imu.bin");
+  buildPath(journalPath, sizeof(journalPath), "journal.bin");
   SD.remove(imuPath);
+  SD.remove(journalPath);
 
   const uint32_t startedUs = micros();
   imuFile_ = SD.sdfs.open(imuPath, O_RDWR | O_CREAT | O_TRUNC);
@@ -647,6 +669,14 @@ bool SdLogger::openAndPreallocateDataFiles() {
       imuFile_.truncate(0);
       imuFile_.close();
     }
+    SD.remove(imuPath);
+    return false;
+  }
+
+  journalFile_ = SD.sdfs.open(journalPath, O_RDWR | O_CREAT | O_TRUNC);
+  if (!journalFile_) {
+    imuFile_.truncate(0);
+    imuFile_.close();
     SD.remove(imuPath);
     return false;
   }
@@ -664,8 +694,10 @@ bool SdLogger::openAndPreallocateDataFiles() {
       }
       imuFile_.truncate(0);
       imuFile_.close();
+      journalFile_.close();
       SD.remove(audioPath);
       SD.remove(imuPath);
+      SD.remove(journalPath);
       return false;
     }
   }
@@ -688,48 +720,33 @@ bool SdLogger::openAndPreallocateDataFiles() {
 }
 
 bool SdLogger::writeJournal(const char* state) {
-  char journalPath[32]{};
-  char temporaryPath[32]{};
-  buildPath(journalPath, sizeof(journalPath), "journal.txt");
-  buildPath(temporaryPath, sizeof(temporaryPath), "journal.tmp");
-  SD.remove(temporaryPath);
-
   const uint32_t startedUs = micros();
-  File file = SD.open(temporaryPath, FILE_WRITE);
-  if (!file) {
-    return false;
-  }
-  file.print("state=");
-  file.println(state);
-  file.print("session=");
-  file.println(sessionNumber_);
-  file.print("uptime_ms=");
-  file.println(millis());
-  file.print("imu_valid_bytes=");
-  file.println(imuDurableBytes_);
-  if (sessionMetadata_.audioEnabled) {
-    file.print("audio_valid_bytes=");
-    file.println(audioDurableBytes_);
-    file.print("audio_silence_blocks_inserted=");
-    file.println(counters_.audioSilenceBlocksInserted);
-    file.print("audio_gap_events=");
-    file.println(counters_.audioGapEvents);
-    file.print("audio_max_gap_blocks=");
-    file.println(counters_.maxAudioGapBlocks);
-    file.print("audio_start_timestamp_valid=");
-    file.println(audioFirstTimestampValid_ ? 1 : 0);
-    file.print("audio_start_timestamp_us=");
-    file.println(audioFirstTimestampUs_);
-  }
-  file.print("imu_preallocated_bytes=");
-  file.println(imuPreallocatedBytes_);
-  file.flush();
-  file.close();
-  SD.remove(journalPath);
-  if (!SD.rename(temporaryPath, journalPath)) {
+  if (!journalFile_) {
     return false;
   }
 
+  data::SdJournalRecord record{};
+  record.magic = data::kSdJournalMagic;
+  record.version = data::kSdJournalVersion;
+  record.state = journalState(state);
+  record.sequence = journalSequence_;
+  record.uptimeMs = millis();
+  record.imuValidBytes = imuDurableBytes_;
+  record.audioValidBytes =
+      sessionMetadata_.audioEnabled ? audioDurableBytes_ : 0;
+  record.crc8 = utils::crc8(reinterpret_cast<const uint8_t*>(&record),
+                            offsetof(data::SdJournalRecord, crc8));
+
+  const uint64_t recordOffset = journalFile_.curPosition();
+  const size_t written = journalFile_.write(
+      reinterpret_cast<const uint8_t*>(&record), sizeof(record));
+  if (written != sizeof(record) || !journalFile_.sync()) {
+    journalFile_.truncate(recordOffset);
+    journalFile_.seekSet(recordOffset);
+    return false;
+  }
+
+  ++journalSequence_;
   const uint32_t durationUs = micros() - startedUs;
   recordOperationDuration(durationUs, counters_.maxJournalDurationUs,
                           counters_.slowJournalUpdates);
@@ -1186,6 +1203,9 @@ void SdLogger::discardEmptyPreallocation() {
     audioFile_.truncate(0);
     audioFile_.close();
   }
+  if (journalFile_) {
+    journalFile_.close();
+  }
 }
 
 void SdLogger::advanceBuffer(size_t count) {
@@ -1288,6 +1308,9 @@ void SdLogger::finishSession(
       if (audioFile_) {
         audioFile_.close();
       }
+      if (journalFile_) {
+        journalFile_.close();
+      }
       sessionActive_ = false;
       Serial.print("SD_SESSION_STOPPED reason=");
       Serial.print(finalState);
@@ -1361,6 +1384,9 @@ void SdLogger::confirmCardFailure(const char* reason) {
   }
   if (audioFile_) {
     audioFile_.close();
+  }
+  if (journalFile_) {
+    journalFile_.close();
   }
   digitalWrite(pins::kSdChipSelect, HIGH);
 }

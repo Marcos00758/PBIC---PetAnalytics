@@ -58,7 +58,8 @@ Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz.
 consultada antes de qualquer operacao do SD. O arquivo recebe no boot uma
 prealocacao de dez minutos e cresce normalmente ao ultrapassar essa reserva.
 Flush e journal ocorrem a cada 1000 pacotes, aproximadamente dez segundos;
-`journal.txt` guarda o prefixo confirmado por `sync()`. Em queda de energia,
+`journal.bin` recebe um registro binario append-only com CRC e guarda o prefixo
+confirmado por `sync()`. Em queda de energia,
 o Python ignora a cauda prealocada e os dados posteriores ao ultimo journal.
 
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
