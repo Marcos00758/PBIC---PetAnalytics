@@ -28,6 +28,7 @@ constexpr uint8_t kSdSpiClockMHz = 12;
 constexpr uint64_t kSdFreeSpaceReserveBytes = 4ULL * 1024ULL * 1024ULL;
 constexpr uint32_t kSdMinimumRecordingSeconds = 60;
 constexpr uint32_t kSdSessionDurationSeconds = 5U * 60U;
+constexpr bool kSdRotateSessions = false;
 constexpr uint32_t kSdPreallocationMarginSeconds = 1;
 constexpr uint32_t kSdPacketsPerFlush = 1000;
 constexpr uint32_t kSdPacketsPerJournalUpdate = 3000;

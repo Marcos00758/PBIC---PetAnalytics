@@ -50,10 +50,11 @@ dado cru. Somente a ausencia de blocos validos gera `AUDIO_CAPTURE_REJECTED`.
 ## Sessões no cartão SD
 
 Com um cartão FAT ou exFAT conectado nos pinos documentados, o firmware cria
-pastas `/Sxxx` consecutivas sem depender de reboot. Para o teste atual, cada
-sessao dura cinco minutos; ao final, os arquivos sao truncados para o tamanho
-real e a proxima pasta e prealocada automaticamente. O firmware nao espera a
-USB e continua adquirindo sem computador.
+uma pasta `/Sxxx` no boot. Para o teste atual, a sessao dura cinco minutos; ao
+final, os arquivos sao sincronizados, truncados para o tamanho real e fechados.
+Nao ha prealocacao nem rotacao para outra pasta durante a captura. A gravacao
+permanece desativada ate o reboot, indicado por `SD_SESSION_COMPLETE`. O
+firmware nao espera a USB e funciona sem computador.
 
 Se um arquivo do SD ficar dois segundos completos sem qualquer progresso de
 escrita, o firmware emite
@@ -71,8 +72,9 @@ do SD, e flush, journal e status so executam com as duas filas em niveis
 seguros. Cada pasta possui
 `journal.txt`, com os tamanhos confirmados dos dois fluxos. Uma queda de
 energia pode deixar uma cauda prealocada, mas o Python ignora automaticamente
-os bytes posteriores ao journal. Para mudar o teste de cinco minutos para uma
-hora, altere apenas `kSdSessionDurationSeconds` depois da validacao em hardware.
+os bytes posteriores ao journal. Depois deste teste de cinco minutos, a mesma
+configuracao deve ser validada por 15 minutos antes de alterar
+`kSdSessionDurationSeconds` para uma hora.
 
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
 ajuste a letra da unidade caso o Windows monte o cartão em outro caminho.

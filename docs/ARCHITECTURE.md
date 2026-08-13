@@ -363,9 +363,11 @@ O logger usa `FsFile::preAllocate()` para reservar `imu.bin` e `audio.raw`.
 No teste atual, cada pasta cobre cinco minutos mais um segundo de margem. Ao
 atingir cinco minutos, o firmware deixa de aceitar novos blocos, drena as duas
 filas, faz flush, trunca os arquivos, marca o journal como
-`completed_duration` e cria automaticamente a proxima pasta. A prealocacao da
-proxima pasta pode causar um pico isolado; sua duracao e registrada em
-`sd_preallocation_duration_us`.
+`completed_duration` e fecha a sessao. `kSdRotateSessions=false` impede a
+criacao e prealocacao de outra pasta; a captura I2S e desligada e um reboot e
+necessario para iniciar nova gravacao. Isso remove a rotacao como variavel do
+teste integrado. Depois de validar cinco minutos, o mesmo modo deve ser
+ensaiado por 15 minutos antes de configurar uma hora.
 
 Cada callback DMA atribui uma sequencia ao bloco, inclusive quando nao ha bloco
 valido disponivel. Se a fila de captura transbordar ou um callback ficar

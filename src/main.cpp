@@ -457,4 +457,8 @@ void loop() {
   }
   pollAndRouteSensorPacket();
   sdLogger.service(acquisition.counters(), audioCapture.counters());
+  if (!sdLogger.sessionActive() && audioCapture.started()) {
+    audioCapture.disable();
+    audioBlockPending = false;
+  }
 }

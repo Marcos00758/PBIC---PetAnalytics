@@ -205,6 +205,7 @@ sd_free_bytes_at_boot=<bytes livres medidos>
 sd_recording_budget_bytes=<bytes livres menos 4 MiB>
 sd_estimated_recording_seconds=<estimativa nominal>
 sd_session_duration_seconds=300
+sd_rotate_sessions=0
 sd_preallocation_margin_seconds=1
 imu_preallocated_bytes=2377900
 audio_preallocated_bytes=26548200
@@ -237,6 +238,11 @@ bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1
 bmp1_nvm=<42 caracteres hexadecimais>
 ```
+
+Com `sd_rotate_sessions=0`, `completed_duration` representa uma sessao
+finalizada e fechada. O firmware nao cria outra `/Sxxx` ate o reboot. Esse
+campo altera apenas o ciclo de vida da gravacao, sem modificar o pacote v4 ou
+o PCM de `audio.raw`.
 
 Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 `python/analyze_imu.py` procura automaticamente `meta.txt` na pasta de

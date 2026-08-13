@@ -507,6 +507,8 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(estimatedRecordingSeconds_);
   file.print("sd_session_duration_seconds=");
   file.println(config::kSdSessionDurationSeconds);
+  file.print("sd_rotate_sessions=");
+  file.println(config::kSdRotateSessions ? 1 : 0);
   file.print("sd_preallocation_margin_seconds=");
   file.println(config::kSdPreallocationMarginSeconds);
   file.print("imu_preallocated_bytes=");
@@ -1297,6 +1299,7 @@ void SdLogger::finishSession(
       return;
     case FinalizeStage::kCloseAndRotate: {
       const bool rotate =
+          config::kSdRotateSessions &&
           strcmp(finalState, "completed_duration") == 0 && cardReady_;
       const uint32_t nextSessionBoundaryMs = stopRequestedAtMs_;
       SdSessionMetadata nextMetadata = sessionMetadata_;
@@ -1313,6 +1316,11 @@ void SdLogger::finishSession(
       Serial.print(counters_.bytesWritten);
       Serial.print(" audio_bytes=");
       Serial.println(counters_.audioBytesWritten);
+
+      if (!rotate && strcmp(finalState, "completed_duration") == 0) {
+        Serial.println(
+            "SD_SESSION_COMPLETE recording_disabled=1 reboot_required=1");
+      }
 
       if (rotate) {
         if (beginSession(nextMetadata, acquisitionCounters, audioCounters)) {
