@@ -90,20 +90,15 @@ PBIC/
 
 /S001/
 ├── imu.bin
-├── audio.raw
 ├── meta.txt
-└── status.txt
-
-/S002/
-├── imu.bin
-├── audio.raw
-├── meta.txt
+├── journal.txt
 └── status.txt
 
 session.txt: Fica na raiz do cartão e guarda o número da última sessão
 imu.bin: Contém os pacotes binários das IMUs e barômetros.
-audio.raw: Contém apenas amostras do microfone
 meta.txt: Descreve a sessão e a configuração.
+journal.txt: Guarda o prefixo de imu.bin confirmado no SD.
+status.txt: Guarda contadores e latências do firmware.
 
 "Exemplo:
 
@@ -148,34 +143,22 @@ binário permanecer desabilitado. Com SD válido, o contador persistente
 durante a sessão.
 
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
-escreve `imu.bin` e `audio.raw` em blocos completos de 512 bytes durante a
-gravacao normal; blocos parciais sao permitidos somente ao encerrar uma sessao.
-Em cada passagem do loop ocorre no maximo uma operacao de SD. Quando as duas
-filas estao prontas, a arbitragem ponderada busca onze escritas de audio para
-uma escrita IMU, proporcao aproximada dos fluxos de 88200 e 7900 bytes/s. A
-cota e corrigida pela ocupacao: ao restarem apenas 2048 bytes livres na fila
-IMU, ela tem precedencia; abaixo desse limite, o audio recebe precedencia ao
-restarem apenas 8192 bytes livres em sua fila. Isso substitui a antiga
-prioridade permanente do audio a partir de 50%. O SPI opera a 12 MHz.
+escreve somente `imu.bin`, em blocos completos de 512 bytes, e executa no
+maximo uma operacao de SD por passagem do loop. O SPI opera a 12 MHz. O
+microfone esta desabilitado na configuracao normal: I2S nao e inicializado,
+`audio.raw` nao e criado e a arbitragem entre IMU e audio permanece apenas no
+codigo experimental.
 
-`main` consulta a aquisicao antes de drenar audio, depois de cada bloco DMA
-transferido e imediatamente antes de chamar o logger. Assim, uma rodada ja
-vencida e executada antes de qualquer nova operacao SD. Uma chamada sincrona ja
-iniciada no SdFat nao pode ser interrompida, portanto as latencias maximas do
-cartao continuam sendo medidas.
+`main` consulta a aquisicao imediatamente antes de chamar o logger. Assim, uma
+rodada ja vencida e executada antes de qualquer nova operacao SD. Uma chamada
+sincrona ja iniciada no SdFat nao pode ser interrompida, portanto as latencias
+maximas do cartao continuam sendo medidas.
 
-Flush nao drena mais as filas. `imu.bin` e `audio.raw` possuem estados de flush
-independentes, executados em passagens diferentes somente quando ha no maximo
-1024 bytes de IMU e 4096 bytes de audio aguardando. Journal e status obedecem
-aos mesmos limites. O journal publica somente os bytes confirmados pelo ultimo
-`sync()` bem-sucedido de cada arquivo. Isso evita as escritas repetidas de 79
-bytes que anteriormente surgiam depois do primeiro flush.
-
-`status.txt` separa as escolhas do agendador por fluxo e motivo: unico fluxo
-pronto, reserva de capacidade ou cota ponderada. Tambem conta operacoes de
-manutencao. O zero-fill continua preservando alinhamento quando o DMA registra
-um salto, mas qualquer valor diferente de zero e tratado como perda a ser
-investigada, nao como regime normal.
+Flush nao drena a fila. `imu.bin` recebe `sync()` a cada 1000 pacotes, cerca de
+dez segundos, somente quando ha no maximo 1024 bytes aguardando. O journal e
+atualizado logo depois e publica apenas os bytes confirmados pelo ultimo
+`sync()` bem-sucedido. `status.txt` registra as escolhas do caminho IMU e as
+operacoes de manutencao.
 
 A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
 de progresso inicia um período de dois segundos; qualquer escrita posterior
@@ -329,7 +312,11 @@ Sons usuais ocuparam ate 14 bits do PCM16; por isso o formato inicial de coleta
 e PCM mono `int16` little-endian. Os 24 bits nativos continuam sendo uma opcao
 futura, mas nao justificam neste momento substituir o DMA oficial e estavel.
 
-## Captura e gravacao de audio
+## Captura e gravacao de audio experimental
+
+Esta implementacao esta preservada para ensaios futuros, mas nao participa do
+firmware normal IMU-only. Com `kMicrophoneRecordingEnabled=false`, o I2S nao e
+inicializado e nenhum arquivo de audio e aberto ou prealocado em `/Sxxx`.
 
 `src/services/audio_capture` usa `AudioInputI2S`, cujo recebimento no Teensy
 4.0 e feito por DMA, e conecta apenas a porta esquerda a um `AudioStream`
@@ -359,15 +346,12 @@ o PCM em `audio.raw`, mas permite registrar no journal o primeiro bloco exato
 de cada sessao rotacionada. `meta.txt` registra formato, taxa e configuracao;
 `journal.txt` e a referencia mais atual para timestamp e tamanhos validos.
 
-O logger usa `FsFile::preAllocate()` para reservar `imu.bin` e `audio.raw`.
-No teste atual, cada pasta cobre cinco minutos mais um segundo de margem. Ao
-atingir cinco minutos, o firmware deixa de aceitar novos blocos, drena as duas
-filas, faz flush, trunca os arquivos, marca o journal como
-`completed_duration` e fecha a sessao. `kSdRotateSessions=false` impede a
-criacao e prealocacao de outra pasta; a captura I2S e desligada e um reboot e
-necessario para iniciar nova gravacao. Isso remove a rotacao como variavel do
-teste integrado. Depois de validar cinco minutos, o mesmo modo deve ser
-ensaiado por 15 minutos antes de configurar uma hora.
+No firmware normal, `FsFile::preAllocate()` reserva inicialmente 4.747.900
+bytes para `imu.bin`, equivalentes a dez minutos mais um segundo de margem. A
+sessao nao termina ao atingir essa reserva: o mesmo arquivo cresce e permanece
+aberto ate reboot ou falha confirmada do cartao. Depois da validacao, a reserva
+planejada de quatro horas sera 113.767.900 bytes; essa mudanca exige apenas
+alterar `kSdPreallocationSeconds`, sem criar rotacao automatica.
 
 Cada callback DMA atribui uma sequencia ao bloco, inclusive quando nao ha bloco
 valido disponivel. Se a fila de captura transbordar ou um callback ficar

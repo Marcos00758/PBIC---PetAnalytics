@@ -26,7 +26,7 @@ struct SdSessionMetadata {
 struct SdLoggerCounters {
   uint32_t packetsQueued = 0;
   uint32_t packetsDropped = 0;
-  uint32_t bytesWritten = 0;
+  uint64_t bytesWritten = 0;
   uint32_t writeAttempts = 0;
   uint32_t writeSuccesses = 0;
   uint32_t writeFailures = 0;
@@ -173,7 +173,7 @@ class SdLogger {
   uint32_t packetsAtLastFlush_ = 0;
   uint32_t packetsAtLastJournal_ = 0;
   uint32_t packetsAtLastStatus_ = 0;
-  uint32_t imuDurableBytes_ = 0;
+  uint64_t imuDurableBytes_ = 0;
   uint32_t audioDurableBytes_ = 0;
   uint32_t nextAudioSequence_ = 0;
   uint8_t successfulAudioWritesSinceImu_ = 0;

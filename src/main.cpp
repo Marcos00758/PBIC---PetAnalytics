@@ -366,16 +366,12 @@ void setup() {
       Serial.print(pet::config::kSdRamBufferBytes);
       Serial.print(" imu_block_bytes=");
       Serial.print(pet::config::kSdImuWriteBlockBytes);
-      Serial.print(" audio_block_bytes=");
-      Serial.print(pet::config::kSdAudioWriteBlockBytes);
       Serial.print(" spi_clock_mhz=");
       Serial.print(pet::config::kSdSpiClockMHz);
       Serial.print(" flush_packets=");
       Serial.print(pet::config::kSdPacketsPerFlush);
-      Serial.print(" audio_buffer_bytes=");
-      Serial.print(pet::config::kSdAudioRamBufferBytes);
-      Serial.print(" session_seconds=");
-      Serial.print(pet::config::kSdSessionDurationSeconds);
+      Serial.print(" continuous=1 preallocation_seconds=");
+      Serial.print(pet::config::kSdPreallocationSeconds);
       Serial.print(" journal_packets=");
       Serial.println(pet::config::kSdPacketsPerJournalUpdate);
     } else {
@@ -440,21 +436,6 @@ void loop() {
     return;
   }
 
-  pollAndRouteSensorPacket();
-
-  while (sdLogger.canEnqueueAudioBlock()) {
-    if (!audioBlockPending) {
-      if (!audioCapture.pop(pendingAudioBlock)) {
-        break;
-      }
-      audioBlockPending = true;
-    }
-    if (!sdLogger.enqueueAudio(pendingAudioBlock)) {
-      break;
-    }
-    audioBlockPending = false;
-    pollAndRouteSensorPacket();
-  }
   pollAndRouteSensorPacket();
   sdLogger.service(acquisition.counters(), audioCapture.counters());
   if (!sdLogger.sessionActive() && audioCapture.started()) {

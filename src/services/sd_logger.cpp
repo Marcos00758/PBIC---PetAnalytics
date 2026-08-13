@@ -15,6 +15,9 @@ constexpr char kSessionPath[] = "/session.txt";
 constexpr char kSessionTempPath[] = "/session.tmp";
 constexpr uint8_t kTestPattern[] = {0x50, 0x42, 0x49, 0x43, 0x53, 0x44};
 
+static_assert(config::kSdContinuousSessionEnabled,
+              "The active IMU logger requires a continuous SD session");
+
 uint32_t nominalRecordingBytesPerSecond() {
   uint32_t bytes = sizeof(data::ImuPacket) * config::kImuSampleRateHz;
   if (config::kMicrophoneRecordingEnabled) {
@@ -27,7 +30,7 @@ uint32_t nominalRecordingBytesPerSecond() {
 uint64_t imuPreallocationBytes() {
   return static_cast<uint64_t>(sizeof(data::ImuPacket)) *
          config::kImuSampleRateHz *
-         (config::kSdSessionDurationSeconds +
+         (config::kSdPreallocationSeconds +
           config::kSdPreallocationMarginSeconds);
 }
 
@@ -35,7 +38,7 @@ uint64_t audioPreallocationBytes() {
   return static_cast<uint64_t>(config::kMicrophoneSampleRateHz) *
          config::kMicrophoneChannels *
          (config::kMicrophoneBitsPerSample / 8U) *
-         (config::kSdSessionDurationSeconds +
+         (config::kSdPreallocationSeconds +
           config::kSdPreallocationMarginSeconds);
 }
 
@@ -342,11 +345,6 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
 
   const uint32_t nowMs = millis();
   if (!stopRequested_) {
-    if (nowMs - sessionStartedMs_ >=
-        config::kSdSessionDurationSeconds * 1000UL) {
-      requestSessionStop("completed_duration");
-    }
-
     if (!imuFlushPending_ && !audioFlushPending_ &&
         counters_.packetsQueued - packetsAtLastFlush_ >=
             config::kSdPacketsPerFlush) {
@@ -379,24 +377,34 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
         bufferedBytes_ >= config::kSdImuWriteBlockBytes ||
         (stopRequested_ && bufferedBytes_ > 0);
     const bool audioReady =
-        audioBufferedBytes_ >= config::kSdAudioWriteBlockBytes ||
-        (stopRequested_ && audioBufferedBytes_ > 0);
+        sessionMetadata_.audioEnabled &&
+        (audioBufferedBytes_ >= config::kSdAudioWriteBlockBytes ||
+         (stopRequested_ && audioBufferedBytes_ > 0));
     if (!operationPerformed) {
-      const SchedulerChoice choice = chooseWrite(imuReady, audioReady);
       bool writeSucceeded = false;
-      if (choice == SchedulerChoice::kImuOnlyReady ||
-          choice == SchedulerChoice::kImuReserve ||
-          choice == SchedulerChoice::kImuQuota) {
+      SchedulerChoice choice = SchedulerChoice::kNone;
+      if (!sessionMetadata_.audioEnabled && imuReady) {
+        choice = SchedulerChoice::kImuOnlyReady;
         writeSucceeded = writeBufferedBytes(
             stopRequested_ && bufferedBytes_ < config::kSdImuWriteBlockBytes);
         operationPerformed = true;
-      } else if (choice == SchedulerChoice::kAudioOnlyReady ||
-                 choice == SchedulerChoice::kAudioReserve ||
-                 choice == SchedulerChoice::kAudioQuota) {
-        writeSucceeded = writeAudioBufferedBytes(
-            stopRequested_ &&
-            audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
-        operationPerformed = true;
+      } else {
+        choice = chooseWrite(imuReady, audioReady);
+        if (choice == SchedulerChoice::kImuOnlyReady ||
+            choice == SchedulerChoice::kImuReserve ||
+            choice == SchedulerChoice::kImuQuota) {
+          writeSucceeded = writeBufferedBytes(
+              stopRequested_ &&
+              bufferedBytes_ < config::kSdImuWriteBlockBytes);
+          operationPerformed = true;
+        } else if (choice == SchedulerChoice::kAudioOnlyReady ||
+                   choice == SchedulerChoice::kAudioReserve ||
+                   choice == SchedulerChoice::kAudioQuota) {
+          writeSucceeded = writeAudioBufferedBytes(
+              stopRequested_ &&
+              audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
+          operationPerformed = true;
+        }
       }
       if (operationPerformed) {
         recordSchedulerChoice(choice, writeSucceeded);
@@ -497,36 +505,28 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(config::kSdSpiClockMHz);
   file.print("sd_imu_write_block_bytes=");
   file.println(config::kSdImuWriteBlockBytes);
-  file.print("sd_audio_write_block_bytes=");
-  file.println(config::kSdAudioWriteBlockBytes);
   file.print("sd_free_bytes_at_boot=");
   file.println(freeBytesAtBoot_);
   file.print("sd_recording_budget_bytes=");
   file.println(recordingBudgetBytes_);
   file.print("sd_estimated_recording_seconds=");
   file.println(estimatedRecordingSeconds_);
-  file.print("sd_session_duration_seconds=");
-  file.println(config::kSdSessionDurationSeconds);
+  file.print("sd_continuous_session=");
+  file.println(config::kSdContinuousSessionEnabled ? 1 : 0);
+  file.print("sd_preallocation_seconds=");
+  file.println(config::kSdPreallocationSeconds);
   file.print("sd_rotate_sessions=");
   file.println(config::kSdRotateSessions ? 1 : 0);
   file.print("sd_preallocation_margin_seconds=");
   file.println(config::kSdPreallocationMarginSeconds);
   file.print("imu_preallocated_bytes=");
   file.println(imuPreallocatedBytes_);
-  file.print("audio_preallocated_bytes=");
-  file.println(audioPreallocatedBytes_);
   file.print("journal_update_packets=");
   file.println(config::kSdPacketsPerJournalUpdate);
-  file.print("sd_scheduler_audio_writes_per_imu_write=");
-  file.println(config::kSdAudioWritesPerImuWrite);
   file.print("sd_scheduler_imu_reserved_capacity_bytes=");
   file.println(config::kSdImuReservedCapacityBytes);
-  file.print("sd_scheduler_audio_reserved_capacity_bytes=");
-  file.println(config::kSdAudioReservedCapacityBytes);
   file.print("sd_maintenance_max_imu_buffered_bytes=");
   file.println(config::kSdMaintenanceMaxImuBufferedBytes);
-  file.print("sd_maintenance_max_audio_buffered_bytes=");
-  file.println(config::kSdMaintenanceMaxAudioBufferedBytes);
   file.print("packet_version=");
   file.println(config::kImuPacketVersion);
   file.print("packet_size=");
@@ -546,55 +546,32 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(config::kIcmGyroRangeDps);
   file.print("audio_enabled=");
   file.println(metadata.audioEnabled ? 1 : 0);
-  file.println("audio_format=pcm_s16le");
-  file.println("audio_file=audio.raw");
-  file.println("audio_byte_order=little");
-  file.println("audio_dma=Teensy_AudioInputI2S");
-  file.print("audio_sample_rate_hz=");
-  file.println(config::kMicrophoneSampleRateHz);
-  file.print("audio_channels=");
-  file.println(config::kMicrophoneChannels);
-  file.print("audio_bits_per_sample=");
-  file.println(config::kMicrophoneBitsPerSample);
-  file.print("audio_block_samples=");
-  file.println(config::kMicrophoneBlockSamples);
-  file.print("audio_capture_queue_usable_blocks=");
-  file.println(config::kMicrophoneQueueBlocks - 1U);
-  file.println("audio_gap_policy=zero_fill");
-  file.println("audio_gap_detection=audio_dma_block_sequence");
-  file.print("audio_sd_buffer_bytes=");
-  file.println(config::kSdAudioRamBufferBytes);
-  file.print("audio_nominal_bytes_per_second=");
-  file.println(config::kMicrophoneSampleRateHz *
-               config::kMicrophoneChannels *
-               (config::kMicrophoneBitsPerSample / 8U));
-  file.println("audio_i2s_channel=left");
-  file.print("audio_start_timestamp_valid=");
-  file.println(metadata.audioStartTimestampValid ? 1 : 0);
-  file.print("audio_start_timestamp_us=");
-  file.println(metadata.audioStartTimestampUs);
-  file.print("audio_preflight_valid=");
-  file.println(metadata.audioPreflight.valid ? 1 : 0);
-  file.print("audio_preflight_accepted=");
-  file.println(metadata.audioPreflight.accepted ? 1 : 0);
-  file.print("audio_preflight_samples=");
-  file.println(metadata.audioPreflight.samples);
-  file.print("audio_preflight_mean_counts=");
-  file.println(metadata.audioPreflight.meanCounts);
-  file.print("audio_preflight_rms_counts=");
-  file.println(metadata.audioPreflight.rmsCounts);
-  file.print("audio_preflight_peak_counts=");
-  file.println(metadata.audioPreflight.peakCounts);
-  file.print("audio_preflight_clipping_samples=");
-  file.println(metadata.audioPreflight.clippingSamples);
-  file.println("audio_timestamp_reference=estimated_first_sample_dma_block");
-  file.print("audio_timestamp_uncertainty_us=");
-  file.println((config::kMicrophoneBlockSamples * 1000000UL +
-                config::kMicrophoneSampleRateHz - 1U) /
-               config::kMicrophoneSampleRateHz);
+  if (metadata.audioEnabled) {
+    file.print("sd_audio_write_block_bytes=");
+    file.println(config::kSdAudioWriteBlockBytes);
+    file.print("audio_preallocated_bytes=");
+    file.println(audioPreallocatedBytes_);
+    file.print("sd_scheduler_audio_writes_per_imu_write=");
+    file.println(config::kSdAudioWritesPerImuWrite);
+    file.println("audio_format=pcm_s16le");
+    file.println("audio_file=audio.raw");
+    file.println("audio_byte_order=little");
+    file.println("audio_dma=Teensy_AudioInputI2S");
+    file.print("audio_sample_rate_hz=");
+    file.println(config::kMicrophoneSampleRateHz);
+    file.print("audio_channels=");
+    file.println(config::kMicrophoneChannels);
+    file.print("audio_bits_per_sample=");
+    file.println(config::kMicrophoneBitsPerSample);
+    file.print("audio_block_samples=");
+    file.println(config::kMicrophoneBlockSamples);
+    file.print("audio_start_timestamp_valid=");
+    file.println(metadata.audioStartTimestampValid ? 1 : 0);
+    file.print("audio_start_timestamp_us=");
+    file.println(metadata.audioStartTimestampUs);
+  }
   file.println("preallocation_enabled=1");
   file.println("preallocation_tail_source=journal.txt");
-  file.println("completed_sessions_truncated=1");
   file.print("icm0_channel=");
   file.println(config::kIcm0Channel);
   file.print("icm1_channel=");
@@ -659,11 +636,8 @@ bool SdLogger::hasSpaceForNextSession() {
 
 bool SdLogger::openAndPreallocateDataFiles() {
   char imuPath[32]{};
-  char audioPath[32]{};
   buildPath(imuPath, sizeof(imuPath), "imu.bin");
-  buildPath(audioPath, sizeof(audioPath), "audio.raw");
   SD.remove(imuPath);
-  SD.remove(audioPath);
 
   const uint32_t startedUs = micros();
   imuFile_ = SD.sdfs.open(imuPath, O_RDWR | O_CREAT | O_TRUNC);
@@ -678,6 +652,9 @@ bool SdLogger::openAndPreallocateDataFiles() {
   }
 
   if (sessionMetadata_.audioEnabled) {
+    char audioPath[32]{};
+    buildPath(audioPath, sizeof(audioPath), "audio.raw");
+    SD.remove(audioPath);
     audioFile_ = SD.sdfs.open(audioPath, O_RDWR | O_CREAT | O_TRUNC);
     if (!audioFile_ || !audioFile_.preAllocate(audioPreallocatedBytes_) ||
         !audioFile_.seekSet(0)) {
@@ -691,14 +668,6 @@ bool SdLogger::openAndPreallocateDataFiles() {
       SD.remove(imuPath);
       return false;
     }
-  } else {
-    audioFile_ = SD.sdfs.open(audioPath, O_RDWR | O_CREAT | O_TRUNC);
-    if (!audioFile_) {
-      imuFile_.truncate(0);
-      imuFile_.close();
-      SD.remove(imuPath);
-      return false;
-    }
   }
 
   const uint32_t durationUs = micros() - startedUs;
@@ -709,8 +678,10 @@ bool SdLogger::openAndPreallocateDataFiles() {
   Serial.print(sessionFolder_);
   Serial.print(" imu_bytes=");
   Serial.print(imuPreallocatedBytes_);
-  Serial.print(" audio_bytes=");
-  Serial.print(audioPreallocatedBytes_);
+  if (sessionMetadata_.audioEnabled) {
+    Serial.print(" audio_bytes=");
+    Serial.print(audioPreallocatedBytes_);
+  }
   Serial.print(" duration_us=");
   Serial.println(durationUs);
   return true;
@@ -736,22 +707,22 @@ bool SdLogger::writeJournal(const char* state) {
   file.println(millis());
   file.print("imu_valid_bytes=");
   file.println(imuDurableBytes_);
-  file.print("audio_valid_bytes=");
-  file.println(audioDurableBytes_);
-  file.print("audio_silence_blocks_inserted=");
-  file.println(counters_.audioSilenceBlocksInserted);
-  file.print("audio_gap_events=");
-  file.println(counters_.audioGapEvents);
-  file.print("audio_max_gap_blocks=");
-  file.println(counters_.maxAudioGapBlocks);
-  file.print("audio_start_timestamp_valid=");
-  file.println(audioFirstTimestampValid_ ? 1 : 0);
-  file.print("audio_start_timestamp_us=");
-  file.println(audioFirstTimestampUs_);
+  if (sessionMetadata_.audioEnabled) {
+    file.print("audio_valid_bytes=");
+    file.println(audioDurableBytes_);
+    file.print("audio_silence_blocks_inserted=");
+    file.println(counters_.audioSilenceBlocksInserted);
+    file.print("audio_gap_events=");
+    file.println(counters_.audioGapEvents);
+    file.print("audio_max_gap_blocks=");
+    file.println(counters_.maxAudioGapBlocks);
+    file.print("audio_start_timestamp_valid=");
+    file.println(audioFirstTimestampValid_ ? 1 : 0);
+    file.print("audio_start_timestamp_us=");
+    file.println(audioFirstTimestampUs_);
+  }
   file.print("imu_preallocated_bytes=");
   file.println(imuPreallocatedBytes_);
-  file.print("audio_preallocated_bytes=");
-  file.println(audioPreallocatedBytes_);
   file.flush();
   file.close();
   SD.remove(journalPath);
@@ -823,21 +794,23 @@ bool SdLogger::writeStatus(
                        acquisitionCounters.magOverflows, data::kIcmCount);
   file.print("usb_dropped_packets=");
   file.println(acquisitionCounters.usbDroppedPackets);
-  file.print("audio_blocks_received=");
-  file.println(audioCounters.blocksReceived -
-               audioCountersAtSessionStart_.blocksReceived);
-  file.print("audio_capture_blocks_dropped=");
-  file.println(audioCounters.blocksDropped -
-               audioCountersAtSessionStart_.blocksDropped);
-  file.print("audio_incomplete_blocks=");
-  file.println(audioCounters.incompleteBlocks -
-               audioCountersAtSessionStart_.incompleteBlocks);
-  file.print("audio_samples_received=");
-  file.println((audioCounters.blocksReceived -
-                audioCountersAtSessionStart_.blocksReceived) *
-               config::kMicrophoneBlockSamples);
-  file.print("audio_capture_queue_high_water_blocks=");
-  file.println(audioCounters.queueHighWaterBlocks);
+  if (sessionMetadata_.audioEnabled) {
+    file.print("audio_blocks_received=");
+    file.println(audioCounters.blocksReceived -
+                 audioCountersAtSessionStart_.blocksReceived);
+    file.print("audio_capture_blocks_dropped=");
+    file.println(audioCounters.blocksDropped -
+                 audioCountersAtSessionStart_.blocksDropped);
+    file.print("audio_incomplete_blocks=");
+    file.println(audioCounters.incompleteBlocks -
+                 audioCountersAtSessionStart_.incompleteBlocks);
+    file.print("audio_samples_received=");
+    file.println((audioCounters.blocksReceived -
+                  audioCountersAtSessionStart_.blocksReceived) *
+                 config::kMicrophoneBlockSamples);
+    file.print("audio_capture_queue_high_water_blocks=");
+    file.println(audioCounters.queueHighWaterBlocks);
+  }
   file.print("sd_packets_queued=");
   file.println(counters_.packetsQueued);
   file.print("sd_packets_dropped=");
@@ -870,40 +843,42 @@ bool SdLogger::writeStatus(
   file.println(counters_.slowStatusUpdates);
   file.print("sd_max_buffered_bytes=");
   file.println(counters_.maxBufferedBytes);
-  file.print("sd_audio_blocks_queued=");
-  file.println(counters_.audioBlocksQueued);
-  file.print("sd_audio_blocks_dropped=");
-  file.println(counters_.audioBlocksDropped);
-  file.print("sd_audio_silence_blocks_inserted=");
-  file.println(counters_.audioSilenceBlocksInserted);
-  file.print("sd_audio_gap_events=");
-  file.println(counters_.audioGapEvents);
-  file.print("sd_audio_max_gap_blocks=");
-  file.println(counters_.maxAudioGapBlocks);
-  file.print("sd_audio_bytes_written=");
-  file.println(counters_.audioBytesWritten);
-  file.print("sd_audio_buffered_bytes=");
-  file.println(audioBufferedBytes_);
-  file.print("sd_audio_write_attempts=");
-  file.println(counters_.audioWriteAttempts);
-  file.print("sd_audio_write_successes=");
-  file.println(counters_.audioWriteSuccesses);
-  file.print("sd_audio_write_failures=");
-  file.println(counters_.audioWriteFailures);
-  file.print("sd_audio_partial_writes=");
-  file.println(counters_.audioPartialWrites);
-  file.print("sd_audio_flushes=");
-  file.println(counters_.audioFlushes);
-  file.print("sd_audio_max_write_duration_us=");
-  file.println(counters_.maxAudioWriteDurationUs);
-  file.print("sd_audio_max_flush_duration_us=");
-  file.println(counters_.maxAudioFlushDurationUs);
-  file.print("sd_audio_slow_writes_over_10ms=");
-  file.println(counters_.slowAudioWrites);
-  file.print("sd_audio_slow_flushes_over_10ms=");
-  file.println(counters_.slowAudioFlushes);
-  file.print("sd_audio_max_buffered_bytes=");
-  file.println(counters_.maxAudioBufferedBytes);
+  if (sessionMetadata_.audioEnabled) {
+    file.print("sd_audio_blocks_queued=");
+    file.println(counters_.audioBlocksQueued);
+    file.print("sd_audio_blocks_dropped=");
+    file.println(counters_.audioBlocksDropped);
+    file.print("sd_audio_silence_blocks_inserted=");
+    file.println(counters_.audioSilenceBlocksInserted);
+    file.print("sd_audio_gap_events=");
+    file.println(counters_.audioGapEvents);
+    file.print("sd_audio_max_gap_blocks=");
+    file.println(counters_.maxAudioGapBlocks);
+    file.print("sd_audio_bytes_written=");
+    file.println(counters_.audioBytesWritten);
+    file.print("sd_audio_buffered_bytes=");
+    file.println(audioBufferedBytes_);
+    file.print("sd_audio_write_attempts=");
+    file.println(counters_.audioWriteAttempts);
+    file.print("sd_audio_write_successes=");
+    file.println(counters_.audioWriteSuccesses);
+    file.print("sd_audio_write_failures=");
+    file.println(counters_.audioWriteFailures);
+    file.print("sd_audio_partial_writes=");
+    file.println(counters_.audioPartialWrites);
+    file.print("sd_audio_flushes=");
+    file.println(counters_.audioFlushes);
+    file.print("sd_audio_max_write_duration_us=");
+    file.println(counters_.maxAudioWriteDurationUs);
+    file.print("sd_audio_max_flush_duration_us=");
+    file.println(counters_.maxAudioFlushDurationUs);
+    file.print("sd_audio_slow_writes_over_10ms=");
+    file.println(counters_.slowAudioWrites);
+    file.print("sd_audio_slow_flushes_over_10ms=");
+    file.println(counters_.slowAudioFlushes);
+    file.print("sd_audio_max_buffered_bytes=");
+    file.println(counters_.maxAudioBufferedBytes);
+  }
   file.print("sd_journal_updates=");
   file.println(counters_.journalUpdates);
   file.print("sd_max_journal_duration_us=");
@@ -914,30 +889,34 @@ bool SdLogger::writeStatus(
   file.println(counters_.maxPreallocationDurationUs);
   file.print("sd_scheduler_imu_selections=");
   file.println(counters_.schedulerImuSelections);
-  file.print("sd_scheduler_audio_selections=");
-  file.println(counters_.schedulerAudioSelections);
   file.print("sd_scheduler_imu_only_ready=");
   file.println(counters_.schedulerImuOnlyReadySelections);
-  file.print("sd_scheduler_imu_reserve=");
-  file.println(counters_.schedulerImuReserveSelections);
-  file.print("sd_scheduler_imu_quota=");
-  file.println(counters_.schedulerImuQuotaSelections);
-  file.print("sd_scheduler_audio_only_ready=");
-  file.println(counters_.schedulerAudioOnlyReadySelections);
-  file.print("sd_scheduler_audio_reserve=");
-  file.println(counters_.schedulerAudioReserveSelections);
-  file.print("sd_scheduler_audio_quota=");
-  file.println(counters_.schedulerAudioQuotaSelections);
+  if (sessionMetadata_.audioEnabled) {
+    file.print("sd_scheduler_audio_selections=");
+    file.println(counters_.schedulerAudioSelections);
+    file.print("sd_scheduler_imu_reserve=");
+    file.println(counters_.schedulerImuReserveSelections);
+    file.print("sd_scheduler_imu_quota=");
+    file.println(counters_.schedulerImuQuotaSelections);
+    file.print("sd_scheduler_audio_only_ready=");
+    file.println(counters_.schedulerAudioOnlyReadySelections);
+    file.print("sd_scheduler_audio_reserve=");
+    file.println(counters_.schedulerAudioReserveSelections);
+    file.print("sd_scheduler_audio_quota=");
+    file.println(counters_.schedulerAudioQuotaSelections);
+  }
   file.print("sd_scheduler_maintenance_operations=");
   file.println(counters_.schedulerMaintenanceOperations);
   file.print("imu_preallocated_bytes=");
   file.println(imuPreallocatedBytes_);
-  file.print("audio_preallocated_bytes=");
-  file.println(audioPreallocatedBytes_);
-  file.print("audio_session_start_timestamp_valid=");
-  file.println(audioFirstTimestampValid_ ? 1 : 0);
-  file.print("audio_session_start_timestamp_us=");
-  file.println(audioFirstTimestampUs_);
+  if (sessionMetadata_.audioEnabled) {
+    file.print("audio_preallocated_bytes=");
+    file.println(audioPreallocatedBytes_);
+    file.print("audio_session_start_timestamp_valid=");
+    file.println(audioFirstTimestampValid_ ? 1 : 0);
+    file.print("audio_session_start_timestamp_us=");
+    file.println(audioFirstTimestampUs_);
+  }
   file.flush();
   file.close();
 

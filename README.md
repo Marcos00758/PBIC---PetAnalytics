@@ -35,26 +35,17 @@ contadores da aquisição e do SD.
 O formato completo está em
 `docs/DATA_FORMAT.md`.
 
-O ICS43434 e capturado pelo DMA da biblioteca `Audio` oficial da Teensy em
-PCM mono `int16`, 44100 Hz, canal esquerdo. Cada sessao mantem `imu.bin` e
-`audio.raw` abertos simultaneamente, com filas RAM independentes. A fila DMA
-mantem ate 511 blocos uteis e cada bloco possui sequencia interna. Se houver
-perda, o firmware insere silencio equivalente no arquivo e registra o evento,
-preservando a duracao e o alinhamento das amostras seguintes. O arquivo de
-audio nao possui cabecalho; os parametros e o timestamp estimado da primeira
-amostra ficam em `meta.txt`. Antes da sessao, dois segundos em silencio sao
-avaliados em RAM. Nivel alto, DC ou clipping acima do esperado geram
-`AUDIO_PREFLIGHT_WARNING`, mas o audio continua sendo gravado para preservar o
-dado cru. Somente a ausencia de blocos validos gera `AUDIO_CAPTURE_REJECTED`.
+O microfone esta desativado na configuracao normal: I2S nao e inicializado e
+nenhum `audio.raw` e criado. O codigo de diagnostico do ICS43434 permanece no
+repositorio para retomada futura, sem participar da aquisicao atual.
 
 ## Sessões no cartão SD
 
 Com um cartão FAT ou exFAT conectado nos pinos documentados, o firmware cria
-uma pasta `/Sxxx` no boot. Para o teste atual, a sessao dura cinco minutos; ao
-final, os arquivos sao sincronizados, truncados para o tamanho real e fechados.
-Nao ha prealocacao nem rotacao para outra pasta durante a captura. A gravacao
-permanece desativada ate o reboot, indicado por `SD_SESSION_COMPLETE`. O
-firmware nao espera a USB e funciona sem computador.
+uma pasta `/Sxxx` no boot e mantem o mesmo `imu.bin` aberto continuamente ate
+o reboot ou uma falha confirmada do SD. Nao existe encerramento por tempo nem
+rotacao para outra pasta. O firmware nao espera a USB e funciona sem
+computador.
 
 Se um arquivo do SD ficar dois segundos completos sem qualquer progresso de
 escrita, o firmware emite
@@ -63,18 +54,12 @@ pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
 e só é controlado depois que o SPI foi encerrado com segurança.
 
 Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz.
-`imu.bin` e `audio.raw` usam blocos completos de 512 bytes durante a gravacao;
-fragmentos finais sao permitidos somente no fechamento. Flushes independentes
-nao drenam as filas. O agendador usa aproximadamente onze escritas de audio
-para cada escrita IMU, mas antecipa o fluxo que atingir sua reserva de
-capacidade. A aquisicao dos sensores e consultada antes de qualquer operacao
-do SD, e flush, journal e status so executam com as duas filas em niveis
-seguros. Cada pasta possui
-`journal.txt`, com os tamanhos confirmados dos dois fluxos. Uma queda de
-energia pode deixar uma cauda prealocada, mas o Python ignora automaticamente
-os bytes posteriores ao journal. Depois deste teste de cinco minutos, a mesma
-configuracao deve ser validada por 15 minutos antes de alterar
-`kSdSessionDurationSeconds` para uma hora.
+`imu.bin` usa escritas completas de 512 bytes. A aquisicao dos sensores e
+consultada antes de qualquer operacao do SD. O arquivo recebe no boot uma
+prealocacao de dez minutos e cresce normalmente ao ultrapassar essa reserva.
+Flush e journal ocorrem a cada 1000 pacotes, aproximadamente dez segundos;
+`journal.txt` guarda o prefixo confirmado por `sync()`. Em queda de energia,
+o Python ignora a cauda prealocada e os dados posteriores ao ultimo journal.
 
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
 ajuste a letra da unidade caso o Windows monte o cartão em outro caminho.
@@ -82,8 +67,6 @@ ajuste a letra da unidade caso o Windows monte o cartão em outro caminho.
 ```powershell
 python python/parse_data.py E:/S001/imu.bin
 python python/analyze_imu.py E:/S001/imu.bin --no-show
-python python/export_audio.py E:/S001 --gain-db 18
-ffplay data/S001_audio.wav
 ```
 
 Quando `meta.txt` acompanha `imu.bin`, o analisador aplica automaticamente a
@@ -183,15 +166,15 @@ O teste deve incluir alguns segundos em silencio, fala em nivel normal e sons
 fortes sem encostar no microfone. O canal esperado e o esquerdo porque `SEL`
 esta ligado ao GND.
 
-Na configuracao normal, `kMicrophoneDiagnosticEnabled=false` e
-`kMicrophoneRecordingEnabled=true`. Nesse modo `audio.raw` e gravado junto de
-`imu.bin`; o diagnostico isolado nao cria arquivos.
+Na configuracao normal, `kMicrophoneDiagnosticEnabled=false`,
+`kAudioSdDiagnosticEnabled=false` e `kMicrophoneRecordingEnabled=false`.
+Os modos de audio devem ser habilitados apenas para diagnosticos dedicados.
 
 O arquivo cru tambem pode ser ouvido diretamente com FFplay 8 usando
 `-ch_layout mono`:
 
 ```powershell
-ffplay -f s16le -ar 44100 -ch_layout mono "E:/S001/audio.raw"
+ffplay -f s16le -ar 44100 -ch_layout mono "E:/M001/audio.raw"
 ```
 
 Para audio de baixo nivel, prefira `python/export_audio.py --gain-db 18`.

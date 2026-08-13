@@ -153,7 +153,6 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 ```text
 /session.txt
 /S001/imu.bin
-/S001/audio.raw
 /S001/meta.txt
 /S001/journal.txt
 /S001/status.txt
@@ -162,35 +161,16 @@ O cartao usa FAT ou exFAT e mantem a seguinte estrutura:
 `imu.bin` contem exatamente a concatenacao dos mesmos pacotes v4 de 79 bytes
 usados no stream USB, sem cabecalho e sem mensagens textuais. O arquivo fica
 aberto durante a sessao. Uma fila circular de 8192 bytes desacopla a producao
-dos pacotes das escritas. O audio possui fila SD separada de 32768 bytes e uma
-fila DMA com 511 blocos uteis. Durante a operacao normal, ambos os arquivos sao
-escritos somente em blocos completos de 512 bytes; uma escrita parcial pode
-ocorrer apenas no fim da sessao. Em cada passagem do loop ocorre no maximo uma
-operacao ao SD. Um
-desligamento abrupto ainda pode perder os dados posteriores ao ultimo flush.
+dos pacotes das escritas. Durante a operacao normal, o arquivo e escrito em
+blocos completos de 512 bytes. Em cada passagem do loop ocorre no maximo uma
+operacao ao SD e a aquisicao dos sensores e atendida antes dessa operacao.
 
-`audio.raw` contem PCM mono assinado de 16 bits, little-endian, sem cabecalho,
-capturado do canal esquerdo do ICS43434 a 44100 Hz. Cada amostra ocupa dois
-bytes e o volume nominal e 88200 bytes/s, aproximadamente 158,76 MB em 30
-minutos. Somado aos pacotes IMU, o volume nominal da sessao e aproximadamente
-173 MB em 30 minutos. O arquivo fica aberto junto de `imu.bin`. A fila DMA/RAM de captura e
-a fila do SD sao independentes das filas dos pacotes IMU.
-
-O volume e consultado no boot e antes de cada nova sessao. O teste atual usa
-rotacao automatica a cada 300 segundos. A reserva nominal por pasta, incluindo
-um segundo de margem, e de 2.377.900 bytes para `imu.bin` e 26.548.200 bytes
-para `audio.raw`. Uma configuracao de uma hora usa a mesma logica alterando
-`kSdSessionDurationSeconds`.
-
-O timestamp inicial do audio usa a mesma origem `micros()` dos pacotes IMU. Ele
-e estimado no recebimento do primeiro bloco DMA, subtraindo a duracao de 128
-amostras. A incerteza documentada e de ate um bloco, aproximadamente 2903 us;
-nao existe timestamp por bloco dentro de `audio.raw`. O indice de uma amostra
-pode ser convertido para a linha de tempo da sessao por:
-
-```text
-audio_timestamp_us = audio_start_timestamp_us + sample_index * 1000000 / 44100
-```
+O microfone esta desativado: I2S nao e inicializado e `/Sxxx/audio.raw` nao e
+criado. O fluxo IMU nominal e 7900 bytes/s, aproximadamente 28,44 MB por hora.
+O teste atual prealoca 4.747.900 bytes, equivalentes a dez minutos mais um
+segundo de margem. O arquivo continua crescendo ao ultrapassar a reserva e
+permanece na mesma pasta ate reboot ou falha confirmada do SD. Depois da
+validacao, a prealocacao planejada de quatro horas sera 113.767.900 bytes.
 
 `meta.txt` e um arquivo ASCII `chave=valor`. Alem de versao, taxas, faixas,
 canais, enderecos e status inicial dos sensores, contem:
@@ -200,49 +180,26 @@ packet_version=4
 packet_size=79
 sd_spi_clock_mhz=12
 sd_imu_write_block_bytes=512
-sd_audio_write_block_bytes=512
 sd_free_bytes_at_boot=<bytes livres medidos>
 sd_recording_budget_bytes=<bytes livres menos 4 MiB>
 sd_estimated_recording_seconds=<estimativa nominal>
-sd_session_duration_seconds=300
+sd_continuous_session=1
+sd_preallocation_seconds=600
 sd_rotate_sessions=0
 sd_preallocation_margin_seconds=1
-imu_preallocated_bytes=2377900
-audio_preallocated_bytes=26548200
-journal_update_packets=3000
-audio_enabled=1
-audio_file=audio.raw
-audio_format=pcm_s16le
-audio_byte_order=little
-audio_sample_rate_hz=44100
-audio_channels=1
-audio_bits_per_sample=16
-audio_block_samples=128
-audio_capture_queue_usable_blocks=511
-audio_gap_policy=zero_fill
-audio_gap_detection=audio_dma_block_sequence
-audio_start_timestamp_valid=1
-audio_start_timestamp_us=<micros estimado da primeira amostra>
-audio_preflight_valid=1
-audio_preflight_accepted=1
-audio_preflight_samples=<amostras avaliadas em RAM>
-audio_preflight_mean_counts=<media DC>
-audio_preflight_rms_counts=<RMS sem DC>
-audio_preflight_peak_counts=<pico absoluto>
-audio_preflight_clipping_samples=<amostras proximas da escala completa>
+imu_preallocated_bytes=4747900
+journal_update_packets=1000
+audio_enabled=0
 preallocation_enabled=1
 preallocation_tail_source=journal.txt
-completed_sessions_truncated=1
 bmp0_nvm_valid=1
 bmp0_nvm=<42 caracteres hexadecimais>
 bmp1_nvm_valid=1
 bmp1_nvm=<42 caracteres hexadecimais>
 ```
 
-Com `sd_rotate_sessions=0`, `completed_duration` representa uma sessao
-finalizada e fechada. O firmware nao cria outra `/Sxxx` ate o reboot. Esse
-campo altera apenas o ciclo de vida da gravacao, sem modificar o pacote v4 ou
-o PCM de `audio.raw`.
+Com `sd_continuous_session=1` e `sd_rotate_sessions=0`, o firmware nao fecha a
+sessao por tempo nem cria outra `/Sxxx`. O pacote v4 permanece inalterado.
 
 Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 `python/analyze_imu.py` procura automaticamente `meta.txt` na pasta de
@@ -250,15 +207,9 @@ Cada NVM possui 21 bytes lidos dos registradores `0x31` a `0x45` do BMP390.
 temperatura em graus Celsius. Sem NVM valida, preserva o grafico de contagens
 cruas e informa `bmp_compensation=unavailable_raw_only`.
 
-`audio_preflight_accepted=0` significa somente que o ambiente nao atingiu o
-limite esperado de silencio; a captura continua se
-`audio_preflight_valid=1`. Isso preserva o audio cru e permite avaliar o
-preflight posteriormente no Python.
-
-A prealocacao SdFat esta habilitada para os dois fluxos. Sessoes completadas
-sao truncadas para os tamanhos efetivos. Se houver desligamento abrupto, os
-arquivos podem manter a cauda reservada; ela nao deve ser interpretada como
-dado real.
+A prealocacao SdFat esta habilitada somente para `imu.bin`. Se houver
+desligamento abrupto, o arquivo pode manter a cauda reservada; ela nao deve ser
+interpretada como dado real.
 
 `journal.txt` e ASCII `chave=valor` e contem:
 
@@ -267,26 +218,15 @@ state=recording
 session=1
 uptime_ms=<tempo do ultimo checkpoint>
 imu_valid_bytes=<prefixo confirmado de imu.bin>
-audio_valid_bytes=<prefixo confirmado de audio.raw>
-audio_silence_blocks_inserted=<blocos zerados no prefixo>
-audio_gap_events=<eventos de perda detectados>
-audio_max_gap_blocks=<maior evento em blocos de 128 amostras>
-audio_start_timestamp_valid=1
-audio_start_timestamp_us=<timestamp do primeiro bloco desta pasta>
 imu_preallocated_bytes=<tamanho reservado>
-audio_preallocated_bytes=<tamanho reservado>
 ```
 
 Os tamanhos publicados correspondem apenas ao prefixo confirmado por `sync()`;
 podem ficar temporariamente atras dos contadores de bytes escritos, mas nunca
 apontam deliberadamente para uma fila ainda nao sincronizada. O primeiro
 checkpoint util ocorre apos aproximadamente dez segundos e os
-seguintes a cada 30 segundos. `python/parse_data.py` e
+seguintes a cada dez segundos. `python/parse_data.py` e
 `python/analyze_imu.py` aplicam `imu_valid_bytes` automaticamente.
-`python/export_audio.py` usa `audio_valid_bytes` e gera um WAV sem a cauda.
-O ganho opcional do WAV nao modifica o arquivo cientifico cru. A ferramenta
-informa `peak_safe_gain_db` e `output_clipped_samples`; ganho acima do limite
-seguro nao recupera uma captura ja saturada.
 
 `status.txt` e atualizado inicialmente e depois a cada 18000 pacotes, ou tres
 minutos a 100 Hz. Ele registra contadores de agendamento, I2C, magnetometros,
@@ -297,33 +237,13 @@ atualizacao usa `status.tmp` e
 renomeacao; apos perda fisica do cartao, o ultimo status persistido naturalmente
 pode nao conter o evento que impediu a escrita.
 
-Para o audio, `status.txt` registra blocos recebidos pelo DMA, overflow da fila
-de captura, blocos incompletos, maior ocupacao da fila, blocos aceitos ou
-descartados pelo buffer do SD, bytes escritos, tentativas e falhas. As maiores
-latencias e quantidades de escritas e flushes acima de 10 ms sao separadas das
-metricas de `imu.bin`.
-
-Cada bloco DMA possui uma sequencia interna que nao entra em `audio.raw`. Um
-salto de sequencia representa amostras irrecuperaveis; o logger insere zeros no
-lugar para que o indice seguinte continue no tempo correto. `status.txt`
-registra `sd_audio_silence_blocks_inserted`, `sd_audio_gap_events` e
-`sd_audio_max_gap_blocks`. Cada bloco corresponde a 128 amostras. Tambem sao
-registrados `sd_partial_writes`, `sd_audio_partial_writes` e ocupacao maxima
-das filas. Os campos `sd_scheduler_imu_selections` e
-`sd_scheduler_audio_selections` informam o total escolhido por fluxo. Os
-sufixos `_only_ready`, `_reserve` e `_quota` separam o motivo da escolha;
-`sd_scheduler_maintenance_operations` conta flushes e atualizacoes textuais
-admitidos com as filas em niveis seguros. `python/export_audio.py` exibe os
-contadores de gap junto das estatisticas do WAV.
-
-`meta.txt` registra a cota `sd_scheduler_audio_writes_per_imu_write`, as
-reservas de capacidade dos dois buffers e os limites de ocupacao usados para
-permitir flush, journal e status. Esses campos descrevem a politica de
-gravacao, mas nao alteram o pacote v4 nem o formato PCM.
+`status.txt` tambem registra `sd_partial_writes`, a ocupacao maxima da fila,
+`sd_scheduler_imu_selections` e `sd_scheduler_maintenance_operations`. Campos
+de audio nao sao emitidos na configuracao normal.
 
 Quando uma falha e confirmada, a Serial emite `SD_ERROR_STATE` com tentativas,
 sucessos, falhas, bytes ainda em cada buffer, idade da falha e maior duracao de
-escrita observada para `imu.bin` e `audio.raw`. Esses dados sao mais atuais que
+escrita observada para `imu.bin`. Esses dados sao mais atuais que
 o ultimo `status.txt`, que pode ter sido escrito minutos antes.
 
 ## Graficos
@@ -350,8 +270,8 @@ misturar o ensaio com as sessoes completas:
 /M001/status.txt
 ```
 
-`audio.raw` possui o mesmo formato das pastas `/Sxxx`: PCM mono `int16`
-little-endian a 44100 Hz. A sessao dura dez minutos, usa uma unica
+`audio.raw` usa o formato experimental PCM mono `int16` little-endian a 44100
+Hz. A sessao dura dez minutos, usa uma unica
 prealocacao de 53008200 bytes, incluindo um segundo de margem, e nao cria
 `imu.bin`. `journal.txt` continua
 sendo a fonte de `audio_valid_bytes`, de modo que `python/export_audio.py`
