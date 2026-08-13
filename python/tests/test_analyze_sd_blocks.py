@@ -50,7 +50,7 @@ class AnalyzeSdBlocksTest(unittest.TestCase):
                 encoding="ascii",
             )
 
-            phases, recommendation = analyze_status(status)
+            phases, recommendation = analyze_status(status, inspect_pcm=False)
 
             self.assertEqual(recommendation, "1024")
             self.assertEqual(phases[0]["pauses_20ms"], 1)

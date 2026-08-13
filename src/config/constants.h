@@ -57,7 +57,7 @@ constexpr uint32_t kAudioPreflightMaximumClippingPpm = 100;
 constexpr uint32_t kAudioSdDiagnosticPhaseSeconds = 5U * 60U;
 constexpr uint32_t kAudioSdDiagnosticDurationSeconds =
     2U * kAudioSdDiagnosticPhaseSeconds;
-constexpr size_t kAudioSdDiagnosticBlockBytes[] = {1024U, 2048U};
+constexpr size_t kAudioSdDiagnosticBlockBytes[] = {256U, 512U};
 constexpr size_t kAudioSdDiagnosticPhaseCount =
     sizeof(kAudioSdDiagnosticBlockBytes) /
     sizeof(kAudioSdDiagnosticBlockBytes[0]);

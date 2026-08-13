@@ -402,8 +402,8 @@ uma pasta `/Mxxx`, prealoca uma unica janela de dez minutos e nao rotaciona
 arquivos. Assim, nenhuma prealocacao ocorre durante a captura.
 
 O caminho isolado preserva PCM16 mono a 44100 Hz, sequencia DMA e zero-fill de
-gaps. A mesma captura continua por duas fases de cinco minutos: 1024 bytes por
-escrita na primeira e 2048 bytes na segunda. Nao ha flush, reinicio de I2S ou
+gaps. A mesma captura continua por duas fases de cinco minutos: 256 bytes por
+escrita na primeira e 512 bytes na segunda. Nao ha flush, reinicio de I2S ou
 prealocacao na transicao. Faz `sync()` a cada dez segundos e atualiza o journal
 a cada trinta segundos. No limite de dez minutos, desliga a origem I2S, drena a
 fila, sincroniza, trunca e grava o status final. Esse modo e temporario e
@@ -412,10 +412,11 @@ mutuamente exclusivo com o diagnostico I2S somente em RAM.
 Cada fase possui contadores proprios de escritas, falhas, gaps, silencio
 inserido, ocupacao do buffer e histograma de latencia nas faixas `<1`, `1-2`,
 `2-5`, `5-10`, `10-20`, `20-50`, `50-100` e `>=100 ms`. O script
-`python/analyze_sd_blocks.py` compara as fases e indica provisoriamente o menor
-bloco sem falhas, gaps ou escritas de pelo menos 100 ms. O resultado em
-hardware decide o bloco do logger integrado; 4096 bytes nao participa deste
-ensaio devido aos bloqueios proximos de 300 ms ja observados.
+`python/analyze_sd_blocks.py` compara as fases, analisa RMS, picos e ocorrencias
+proximas de `+/-16384` e `+/-32768`, e indica provisoriamente o menor bloco sem
+falhas, gaps, escritas de pelo menos 100 ms ou assinatura PCM suspeita. O
+resultado em hardware decide o bloco do logger integrado. O M002 rejeitou 1024
+e 2048 bytes por corrupcao PCM, apesar de zero falhas e gaps no transporte.
 
 S012 demonstrou que a continuidade de audio foi preservada por zero-fill:
 300,008 s, 76 blocos perdidos em 50 eventos e maior gap de quatro blocos. No

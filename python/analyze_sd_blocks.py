@@ -1,9 +1,12 @@
-"""Compare the 1024-byte and 2048-byte phases of an isolated SD test."""
+"""Compare SD write phases and inspect each phase for PCM corruption."""
 
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
+
+import numpy as np
 
 from parse_data import load_key_value_file
 
@@ -66,13 +69,64 @@ def analyze_phase(values: dict[str, str], index: int) -> dict[str, int | float]:
     }
 
 
-def recommend(phases: list[dict[str, int | float]]) -> str:
+def analyze_pcm(audio_path: Path, phases: list[dict[str, int | float]]) -> None:
+    offset = 0
+    with audio_path.open("rb") as audio:
+        for phase in phases:
+            remaining = int(phase["bytes_written"])
+            samples = 0
+            sum_squares = 0.0
+            peak = 0
+            high_amplitude = 0
+            near_high_bit_rails = 0
+            audio.seek(offset)
+            while remaining > 0:
+                raw = audio.read(min(64 * 1024, remaining))
+                if not raw:
+                    raise ValueError("audio.raw ends before the recorded phase sizes")
+                remaining -= len(raw)
+                raw = raw[: len(raw) - len(raw) % 2]
+                pcm = np.frombuffer(raw, dtype="<i2").astype(np.int32)
+                absolute = np.abs(pcm)
+                samples += int(pcm.size)
+                sum_squares += float(np.dot(pcm.astype(np.float64), pcm))
+                peak = max(peak, int(np.max(absolute, initial=0)))
+                high_amplitude += int(np.count_nonzero(absolute >= 12000))
+                rail_distance = np.minimum(
+                    np.abs(absolute - 16384), np.abs(absolute - 32768)
+                )
+                near_high_bit_rails += int(
+                    np.count_nonzero((absolute >= 12000) & (rail_distance <= 512))
+                )
+            offset += int(phase["bytes_written"])
+            rms = math.sqrt(sum_squares / samples) if samples else 0.0
+            rail_percent = (
+                near_high_bit_rails * 100.0 / samples if samples else 0.0
+            )
+            phase.update(
+                {
+                    "pcm_samples": samples,
+                    "pcm_rms_counts": rms,
+                    "pcm_rms_dbfs": (
+                        20.0 * math.log10(rms / 32768.0) if rms else -120.0
+                    ),
+                    "pcm_peak": peak,
+                    "pcm_high_amplitude_samples": high_amplitude,
+                    "pcm_near_high_bit_rails": near_high_bit_rails,
+                    "pcm_near_high_bit_rails_percent": rail_percent,
+                    "pcm_suspicious": rail_percent >= 0.05,
+                }
+            )
+
+
+def recommend(phases: list[dict[str, int | float | bool]]) -> str:
     acceptable = [
         phase
         for phase in phases
         if phase["write_failures"] == 0
         and phase["gap_events"] == 0
         and phase["bucket_ge_100ms"] == 0
+        and not phase.get("pcm_suspicious", False)
     ]
     if not acceptable:
         return "inconclusive_no_block_without_failures_gaps_or_100ms_pauses"
@@ -89,11 +143,16 @@ def recommend(phases: list[dict[str, int | float]]) -> str:
     return str(larger["block_bytes"] if materially_worse else smaller["block_bytes"])
 
 
-def analyze_status(status_path: Path) -> tuple[list[dict[str, int | float]], str]:
+def analyze_status(
+    status_path: Path, inspect_pcm: bool = True
+) -> tuple[list[dict[str, int | float | bool]], str]:
     values = load_key_value_file(status_path)
     if values.get("state") != "completed_duration":
         raise ValueError("benchmark status is not completed_duration")
     phases = [analyze_phase(values, index) for index in range(2)]
+    audio_path = status_path.parent / "audio.raw"
+    if inspect_pcm and audio_path.exists():
+        analyze_pcm(audio_path, phases)
     return phases, recommend(phases)
 
 
@@ -127,6 +186,17 @@ def main() -> int:
                 f"{name}={phase[f'bucket_{name}']}" for name in BUCKET_NAMES
             )
         )
+        if "pcm_samples" in phase:
+            print(
+                f"pcm rms_counts={phase['pcm_rms_counts']:.2f} "
+                f"rms_dbfs={phase['pcm_rms_dbfs']:.3f} "
+                f"peak={phase['pcm_peak']} "
+                f"samples_abs_ge_12000={phase['pcm_high_amplitude_samples']} "
+                f"near_high_bit_rails={phase['pcm_near_high_bit_rails']} "
+                f"near_high_bit_rails_percent="
+                f"{phase['pcm_near_high_bit_rails_percent']:.4f} "
+                f"suspicious={int(bool(phase['pcm_suspicious']))}"
+            )
     print(f"provisional_recommended_block_bytes={recommendation}")
     return 0
 
