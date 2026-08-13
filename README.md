@@ -64,8 +64,11 @@ e só é controlado depois que o SPI foi encerrado com segurança.
 Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz.
 `imu.bin` e `audio.raw` usam blocos completos de 512 bytes durante a gravacao;
 fragmentos finais sao permitidos somente no fechamento. Flushes independentes
-nao drenam as filas, e o audio recebe prioridade quando sua ocupacao passa de
-50%. Cada pasta possui
+nao drenam as filas. O agendador usa aproximadamente onze escritas de audio
+para cada escrita IMU, mas antecipa o fluxo que atingir sua reserva de
+capacidade. A aquisicao dos sensores e consultada antes de qualquer operacao
+do SD, e flush, journal e status so executam com as duas filas em niveis
+seguros. Cada pasta possui
 `journal.txt`, com os tamanhos confirmados dos dois fluxos. Uma queda de
 energia pode deixar uma cauda prealocada, mas o Python ignora automaticamente
 os bytes posteriores ao journal. Para mudar o teste de cinco minutos para uma

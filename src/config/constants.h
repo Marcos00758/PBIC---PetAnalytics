@@ -7,7 +7,7 @@ namespace pet::config {
 constexpr uint32_t kSerialBaud = 115200;
 constexpr bool kUsbBinaryStreamEnabled = false;
 constexpr bool kMicrophoneDiagnosticEnabled = false;
-constexpr bool kAudioSdDiagnosticEnabled = true;
+constexpr bool kAudioSdDiagnosticEnabled = false;
 constexpr bool kMicrophoneRecordingEnabled = true;
 constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
 constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
@@ -18,7 +18,7 @@ constexpr uint8_t kMicrophoneChannels = 1;
 constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.4.2";
+constexpr char kFirmwareVersion[] = "0.4.3";
 
 constexpr size_t kSdRamBufferBytes = 8192;
 constexpr size_t kSdAudioRamBufferBytes = 32768;
@@ -40,7 +40,14 @@ constexpr uint32_t kSdFailureLedCycleMs = 1200;
 constexpr uint32_t kSdFailureLedPulseMs = 150;
 constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
 constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
-constexpr uint8_t kSdAudioUrgentPercent = 50;
+constexpr uint8_t kSdAudioWritesPerImuWrite = 11;
+constexpr size_t kSdImuReservedCapacityBytes = 4U * kSdImuWriteBlockBytes;
+constexpr size_t kSdAudioReservedCapacityBytes =
+    16U * kSdAudioWriteBlockBytes;
+constexpr size_t kSdMaintenanceMaxImuBufferedBytes =
+    2U * kSdImuWriteBlockBytes;
+constexpr size_t kSdMaintenanceMaxAudioBufferedBytes =
+    8U * kSdAudioWriteBlockBytes;
 static_assert(kSdRamBufferBytes % kSdImuWriteBlockBytes == 0,
               "SD RAM buffer must contain complete write blocks");
 static_assert(kSdAudioRamBufferBytes % kSdAudioWriteBlockBytes == 0,
@@ -48,6 +55,16 @@ static_assert(kSdAudioRamBufferBytes % kSdAudioWriteBlockBytes == 0,
 static_assert(kMicrophoneBlockSamples * sizeof(int16_t) <=
                   kSdAudioRamBufferBytes,
               "audio SD buffer must contain a complete audio block");
+static_assert(kSdImuReservedCapacityBytes < kSdRamBufferBytes,
+              "IMU reservation must leave writable buffer capacity");
+static_assert(kSdAudioReservedCapacityBytes < kSdAudioRamBufferBytes,
+              "audio reservation must leave writable buffer capacity");
+static_assert(kSdMaintenanceMaxImuBufferedBytes <=
+                  kSdRamBufferBytes - kSdImuReservedCapacityBytes,
+              "IMU maintenance threshold must be below urgency threshold");
+static_assert(kSdMaintenanceMaxAudioBufferedBytes <=
+                  kSdAudioRamBufferBytes - kSdAudioReservedCapacityBytes,
+              "audio maintenance threshold must be below urgency threshold");
 
 constexpr uint32_t kAudioPreflightDurationMs = 2000;
 constexpr int32_t kAudioPreflightMaximumAbsMeanCounts = 1024;

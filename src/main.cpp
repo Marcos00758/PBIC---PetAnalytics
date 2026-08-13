@@ -37,6 +37,28 @@ bool acquisitionReady = false;
 pet::services::AudioPcmBlock pendingAudioBlock{};
 bool audioBlockPending = false;
 
+void pollAndRouteSensorPacket() {
+  if (!acquisitionReady) {
+    return;
+  }
+
+  pet::data::ImuPacket packet{};
+  if (!acquisition.poll(packet)) {
+    return;
+  }
+  sdLogger.enqueue(packet);
+
+  if (!pet::config::kUsbBinaryStreamEnabled) {
+    return;
+  }
+  if (Serial && Serial.availableForWrite() >=
+                    static_cast<int>(sizeof(pet::data::ImuPacket))) {
+    Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+  } else {
+    acquisition.recordUsbDrop();
+  }
+}
+
 void printHexByte(uint8_t value) {
   if (value < 0x10) {
     Serial.print('0');
@@ -418,19 +440,7 @@ void loop() {
     return;
   }
 
-  pet::data::ImuPacket packet{};
-  if (acquisition.poll(packet)) {
-    sdLogger.enqueue(packet);
-
-    if (pet::config::kUsbBinaryStreamEnabled) {
-      if (Serial && Serial.availableForWrite() >=
-                        static_cast<int>(sizeof(pet::data::ImuPacket))) {
-        Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
-      } else {
-        acquisition.recordUsbDrop();
-      }
-    }
-  }
+  pollAndRouteSensorPacket();
 
   while (sdLogger.canEnqueueAudioBlock()) {
     if (!audioBlockPending) {
@@ -443,6 +453,8 @@ void loop() {
       break;
     }
     audioBlockPending = false;
+    pollAndRouteSensorPacket();
   }
+  pollAndRouteSensorPacket();
   sdLogger.service(acquisition.counters(), audioCapture.counters());
 }

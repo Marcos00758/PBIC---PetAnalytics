@@ -49,7 +49,6 @@ struct SdLoggerCounters {
   uint32_t audioWriteSuccesses = 0;
   uint32_t audioWriteFailures = 0;
   uint32_t audioPartialWrites = 0;
-  uint32_t audioPriorityWrites = 0;
   uint32_t audioFlushes = 0;
   uint32_t maxAudioWriteDurationUs = 0;
   uint32_t maxAudioFlushDurationUs = 0;
@@ -60,6 +59,15 @@ struct SdLoggerCounters {
   uint32_t maxJournalDurationUs = 0;
   uint32_t slowJournalUpdates = 0;
   uint32_t maxPreallocationDurationUs = 0;
+  uint32_t schedulerImuSelections = 0;
+  uint32_t schedulerAudioSelections = 0;
+  uint32_t schedulerImuOnlyReadySelections = 0;
+  uint32_t schedulerImuReserveSelections = 0;
+  uint32_t schedulerImuQuotaSelections = 0;
+  uint32_t schedulerAudioOnlyReadySelections = 0;
+  uint32_t schedulerAudioReserveSelections = 0;
+  uint32_t schedulerAudioQuotaSelections = 0;
+  uint32_t schedulerMaintenanceOperations = 0;
 };
 
 class SdLogger {
@@ -92,6 +100,16 @@ class SdLogger {
   const SdLoggerCounters& counters() const { return counters_; }
 
  private:
+  enum class SchedulerChoice : uint8_t {
+    kNone,
+    kImuOnlyReady,
+    kImuReserve,
+    kImuQuota,
+    kAudioOnlyReady,
+    kAudioReserve,
+    kAudioQuota,
+  };
+
   enum class FinalizeStage : uint8_t {
     kIdle,
     kFlushImu,
@@ -118,6 +136,12 @@ class SdLogger {
   bool writeAudioBufferedBytes(bool allowPartialBlock);
   bool flushImuFile();
   bool flushAudioFile();
+  bool maintenanceSafe() const;
+  bool performPendingMaintenance(
+      const AcquisitionCounters& acquisitionCounters,
+      const AudioCaptureCounters& audioCounters);
+  SchedulerChoice chooseWrite(bool imuReady, bool audioReady) const;
+  void recordSchedulerChoice(SchedulerChoice choice, bool writeSucceeded);
   void discardEmptyPreallocation();
   void advanceBuffer(size_t count);
   void advanceAudioBuffer(size_t count);
@@ -152,6 +176,7 @@ class SdLogger {
   uint32_t imuDurableBytes_ = 0;
   uint32_t audioDurableBytes_ = 0;
   uint32_t nextAudioSequence_ = 0;
+  uint8_t successfulAudioWritesSinceImu_ = 0;
   bool audioSequenceInitialized_ = false;
   bool audioGapInProgress_ = false;
   bool imuFlushPending_ = false;

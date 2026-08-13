@@ -151,14 +151,31 @@ Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
 escreve `imu.bin` e `audio.raw` em blocos completos de 512 bytes durante a
 gravacao normal; blocos parciais sao permitidos somente ao encerrar uma sessao.
 Em cada passagem do loop ocorre no maximo uma operacao de SD. Quando as duas
-filas estao prontas, o logger escolhe a proporcionalmente mais cheia e forca a
-prioridade do audio quando sua fila atinge 50%. O SPI opera a 12 MHz.
+filas estao prontas, a arbitragem ponderada busca onze escritas de audio para
+uma escrita IMU, proporcao aproximada dos fluxos de 88200 e 7900 bytes/s. A
+cota e corrigida pela ocupacao: ao restarem apenas 2048 bytes livres na fila
+IMU, ela tem precedencia; abaixo desse limite, o audio recebe precedencia ao
+restarem apenas 8192 bytes livres em sua fila. Isso substitui a antiga
+prioridade permanente do audio a partir de 50%. O SPI opera a 12 MHz.
+
+`main` consulta a aquisicao antes de drenar audio, depois de cada bloco DMA
+transferido e imediatamente antes de chamar o logger. Assim, uma rodada ja
+vencida e executada antes de qualquer nova operacao SD. Uma chamada sincrona ja
+iniciada no SdFat nao pode ser interrompida, portanto as latencias maximas do
+cartao continuam sendo medidas.
 
 Flush nao drena mais as filas. `imu.bin` e `audio.raw` possuem estados de flush
-independentes, executados em passagens diferentes do loop quando nao ha bloco
-pronto para escrita. O journal publica somente os bytes confirmados pelo ultimo
+independentes, executados em passagens diferentes somente quando ha no maximo
+1024 bytes de IMU e 4096 bytes de audio aguardando. Journal e status obedecem
+aos mesmos limites. O journal publica somente os bytes confirmados pelo ultimo
 `sync()` bem-sucedido de cada arquivo. Isso evita as escritas repetidas de 79
 bytes que anteriormente surgiam depois do primeiro flush.
+
+`status.txt` separa as escolhas do agendador por fluxo e motivo: unico fluxo
+pronto, reserva de capacidade ou cota ponderada. Tambem conta operacoes de
+manutencao. O zero-fill continua preservando alinhamento quando o DMA registra
+um salto, mas qualquer valor diferente de zero e tratado como perda a ser
+investigada, nao como regime normal.
 
 A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
 de progresso inicia um período de dois segundos; qualquer escrita posterior
@@ -417,6 +434,10 @@ proximas de `+/-16384` e `+/-32768`, e indica provisoriamente o menor bloco sem
 falhas, gaps, escritas de pelo menos 100 ms ou assinatura PCM suspeita. O
 resultado em hardware decide o bloco do logger integrado. O M002 rejeitou 1024
 e 2048 bytes por corrupcao PCM, apesar de zero falhas e gaps no transporte.
+O M004 validou audio inteligivel com 256 e 512 bytes. A fase de 512 bytes
+reduziu pela metade as chamadas ao SD e teve menor latencia maxima; por isso o
+logger integrado permanece em 512 bytes. Dois gaps isolados de um bloco nessa
+fase continuam sendo tratados como contingencia.
 
 S012 demonstrou que a continuidade de audio foi preservada por zero-fill:
 300,008 s, 76 blocos perdidos em 50 eventos e maior gap de quatro blocos. No

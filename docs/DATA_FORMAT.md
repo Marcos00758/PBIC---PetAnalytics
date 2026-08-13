@@ -302,9 +302,18 @@ salto de sequencia representa amostras irrecuperaveis; o logger insere zeros no
 lugar para que o indice seguinte continue no tempo correto. `status.txt`
 registra `sd_audio_silence_blocks_inserted`, `sd_audio_gap_events` e
 `sd_audio_max_gap_blocks`. Cada bloco corresponde a 128 amostras. Tambem sao
-registrados `sd_partial_writes`, `sd_audio_partial_writes`, ocupacao maxima das
-filas e quantas vezes o audio recebeu prioridade. `python/export_audio.py`
-exibe os contadores de gap junto das estatisticas do WAV.
+registrados `sd_partial_writes`, `sd_audio_partial_writes` e ocupacao maxima
+das filas. Os campos `sd_scheduler_imu_selections` e
+`sd_scheduler_audio_selections` informam o total escolhido por fluxo. Os
+sufixos `_only_ready`, `_reserve` e `_quota` separam o motivo da escolha;
+`sd_scheduler_maintenance_operations` conta flushes e atualizacoes textuais
+admitidos com as filas em niveis seguros. `python/export_audio.py` exibe os
+contadores de gap junto das estatisticas do WAV.
+
+`meta.txt` registra a cota `sd_scheduler_audio_writes_per_imu_write`, as
+reservas de capacidade dos dois buffers e os limites de ocupacao usados para
+permitir flush, journal e status. Esses campos descrevem a politica de
+gravacao, mas nao alteram o pacote v4 nem o formato PCM.
 
 Quando uma falha e confirmada, a Serial emite `SD_ERROR_STATE` com tentativas,
 sucessos, falhas, bytes ainda em cada buffer, idade da falha e maior duracao de

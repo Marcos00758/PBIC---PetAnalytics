@@ -162,6 +162,7 @@ bool SdLogger::beginSession(
   audioDurableBytes_ = 0;
   audioSequenceInitialized_ = false;
   audioGapInProgress_ = false;
+  successfulAudioWritesSinceImu_ = 0;
   imuFlushPending_ = false;
   audioFlushPending_ = false;
   journalPending_ = false;
@@ -368,6 +369,11 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
   }
 
   bool operationPerformed = false;
+  if (!stopRequested_ && maintenanceSafe()) {
+    operationPerformed =
+        performPendingMaintenance(acquisitionCounters, audioCounters);
+  }
+
   if (static_cast<int32_t>(nowMs - nextWriteRetryMs_) >= 0) {
     const bool imuReady =
         bufferedBytes_ >= config::kSdImuWriteBlockBytes ||
@@ -375,31 +381,26 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
     const bool audioReady =
         audioBufferedBytes_ >= config::kSdAudioWriteBlockBytes ||
         (stopRequested_ && audioBufferedBytes_ > 0);
-    bool chooseAudio = audioReady && !imuReady;
-    if (imuReady && audioReady) {
-      const bool audioUrgent =
-          static_cast<uint64_t>(audioBufferedBytes_) * 100U >=
-          static_cast<uint64_t>(config::kSdAudioRamBufferBytes) *
-              config::kSdAudioUrgentPercent;
-      const bool audioAtLeastAsFull =
-          static_cast<uint64_t>(audioBufferedBytes_) *
-              config::kSdRamBufferBytes >=
-          static_cast<uint64_t>(bufferedBytes_) *
-              config::kSdAudioRamBufferBytes;
-      chooseAudio = audioUrgent || audioAtLeastAsFull;
-      if (chooseAudio) {
-        ++counters_.audioPriorityWrites;
+    if (!operationPerformed) {
+      const SchedulerChoice choice = chooseWrite(imuReady, audioReady);
+      bool writeSucceeded = false;
+      if (choice == SchedulerChoice::kImuOnlyReady ||
+          choice == SchedulerChoice::kImuReserve ||
+          choice == SchedulerChoice::kImuQuota) {
+        writeSucceeded = writeBufferedBytes(
+            stopRequested_ && bufferedBytes_ < config::kSdImuWriteBlockBytes);
+        operationPerformed = true;
+      } else if (choice == SchedulerChoice::kAudioOnlyReady ||
+                 choice == SchedulerChoice::kAudioReserve ||
+                 choice == SchedulerChoice::kAudioQuota) {
+        writeSucceeded = writeAudioBufferedBytes(
+            stopRequested_ &&
+            audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
+        operationPerformed = true;
       }
-    }
-    if (chooseAudio) {
-      writeAudioBufferedBytes(
-          stopRequested_ &&
-          audioBufferedBytes_ < config::kSdAudioWriteBlockBytes);
-      operationPerformed = true;
-    } else if (imuReady) {
-      writeBufferedBytes(stopRequested_ &&
-                         bufferedBytes_ < config::kSdImuWriteBlockBytes);
-      operationPerformed = true;
+      if (operationPerformed) {
+        recordSchedulerChoice(choice, writeSucceeded);
+      }
     }
   }
 
@@ -407,45 +408,6 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
       audioBufferedBytes_ == 0 && sessionActive_) {
     finishSession(acquisitionCounters, audioCounters);
     return;
-  }
-
-  if (!operationPerformed && !stopRequested_) {
-    if (imuFlushPending_) {
-      if (!flushImuFile()) {
-        confirmCardFailure("imu_flush");
-        return;
-      }
-      imuFlushPending_ = false;
-      operationPerformed = true;
-    } else if (audioFlushPending_) {
-      if (!flushAudioFile()) {
-        confirmCardFailure("audio_flush");
-        return;
-      }
-      audioFlushPending_ = false;
-      operationPerformed = true;
-    } else if (journalPending_) {
-      if (!writeJournal("recording")) {
-        confirmCardFailure("journal_update");
-        return;
-      }
-      packetsAtLastJournal_ = counters_.packetsQueued;
-      journalPending_ = false;
-      operationPerformed = true;
-    } else if (statusPending_) {
-      const uint32_t statusStartedUs = micros();
-      const bool statusWritten =
-          writeStatus(acquisitionCounters, audioCounters, "recording");
-      recordOperationDuration(micros() - statusStartedUs,
-                              counters_.maxStatusDurationUs,
-                              counters_.slowStatusUpdates);
-      if (!statusWritten) {
-        confirmCardFailure("status_update");
-        return;
-      }
-      packetsAtLastStatus_ = counters_.packetsQueued;
-      statusPending_ = false;
-    }
   }
 
   checkWriteFailureTimeout();
@@ -553,6 +515,16 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(audioPreallocatedBytes_);
   file.print("journal_update_packets=");
   file.println(config::kSdPacketsPerJournalUpdate);
+  file.print("sd_scheduler_audio_writes_per_imu_write=");
+  file.println(config::kSdAudioWritesPerImuWrite);
+  file.print("sd_scheduler_imu_reserved_capacity_bytes=");
+  file.println(config::kSdImuReservedCapacityBytes);
+  file.print("sd_scheduler_audio_reserved_capacity_bytes=");
+  file.println(config::kSdAudioReservedCapacityBytes);
+  file.print("sd_maintenance_max_imu_buffered_bytes=");
+  file.println(config::kSdMaintenanceMaxImuBufferedBytes);
+  file.print("sd_maintenance_max_audio_buffered_bytes=");
+  file.println(config::kSdMaintenanceMaxAudioBufferedBytes);
   file.print("packet_version=");
   file.println(config::kImuPacketVersion);
   file.print("packet_size=");
@@ -918,8 +890,6 @@ bool SdLogger::writeStatus(
   file.println(counters_.audioWriteFailures);
   file.print("sd_audio_partial_writes=");
   file.println(counters_.audioPartialWrites);
-  file.print("sd_audio_priority_writes=");
-  file.println(counters_.audioPriorityWrites);
   file.print("sd_audio_flushes=");
   file.println(counters_.audioFlushes);
   file.print("sd_audio_max_write_duration_us=");
@@ -940,6 +910,24 @@ bool SdLogger::writeStatus(
   file.println(counters_.slowJournalUpdates);
   file.print("sd_preallocation_duration_us=");
   file.println(counters_.maxPreallocationDurationUs);
+  file.print("sd_scheduler_imu_selections=");
+  file.println(counters_.schedulerImuSelections);
+  file.print("sd_scheduler_audio_selections=");
+  file.println(counters_.schedulerAudioSelections);
+  file.print("sd_scheduler_imu_only_ready=");
+  file.println(counters_.schedulerImuOnlyReadySelections);
+  file.print("sd_scheduler_imu_reserve=");
+  file.println(counters_.schedulerImuReserveSelections);
+  file.print("sd_scheduler_imu_quota=");
+  file.println(counters_.schedulerImuQuotaSelections);
+  file.print("sd_scheduler_audio_only_ready=");
+  file.println(counters_.schedulerAudioOnlyReadySelections);
+  file.print("sd_scheduler_audio_reserve=");
+  file.println(counters_.schedulerAudioReserveSelections);
+  file.print("sd_scheduler_audio_quota=");
+  file.println(counters_.schedulerAudioQuotaSelections);
+  file.print("sd_scheduler_maintenance_operations=");
+  file.println(counters_.schedulerMaintenanceOperations);
   file.print("imu_preallocated_bytes=");
   file.println(imuPreallocatedBytes_);
   file.print("audio_preallocated_bytes=");
@@ -1073,6 +1061,139 @@ bool SdLogger::flushAudioFile() {
     audioDurableBytes_ = counters_.audioBytesWritten;
   }
   return success;
+}
+
+bool SdLogger::maintenanceSafe() const {
+  const bool imuSafe =
+      bufferedBytes_ <= config::kSdMaintenanceMaxImuBufferedBytes;
+  const bool audioSafe =
+      !sessionMetadata_.audioEnabled ||
+      audioBufferedBytes_ <= config::kSdMaintenanceMaxAudioBufferedBytes;
+  return imuSafe && audioSafe;
+}
+
+bool SdLogger::performPendingMaintenance(
+    const AcquisitionCounters& acquisitionCounters,
+    const AudioCaptureCounters& audioCounters) {
+  if (imuFlushPending_) {
+    ++counters_.schedulerMaintenanceOperations;
+    if (!flushImuFile()) {
+      confirmCardFailure("imu_flush");
+      return true;
+    }
+    imuFlushPending_ = false;
+    return true;
+  }
+  if (audioFlushPending_) {
+    ++counters_.schedulerMaintenanceOperations;
+    if (!flushAudioFile()) {
+      confirmCardFailure("audio_flush");
+      return true;
+    }
+    audioFlushPending_ = false;
+    return true;
+  }
+  if (journalPending_) {
+    ++counters_.schedulerMaintenanceOperations;
+    if (!writeJournal("recording")) {
+      confirmCardFailure("journal_update");
+      return true;
+    }
+    packetsAtLastJournal_ = counters_.packetsQueued;
+    journalPending_ = false;
+    return true;
+  }
+  if (statusPending_) {
+    ++counters_.schedulerMaintenanceOperations;
+    const uint32_t statusStartedUs = micros();
+    const bool statusWritten =
+        writeStatus(acquisitionCounters, audioCounters, "recording");
+    recordOperationDuration(micros() - statusStartedUs,
+                            counters_.maxStatusDurationUs,
+                            counters_.slowStatusUpdates);
+    if (!statusWritten) {
+      confirmCardFailure("status_update");
+      return true;
+    }
+    packetsAtLastStatus_ = counters_.packetsQueued;
+    statusPending_ = false;
+    return true;
+  }
+  return false;
+}
+
+SdLogger::SchedulerChoice SdLogger::chooseWrite(bool imuReady,
+                                                bool audioReady) const {
+  if (!imuReady && !audioReady) {
+    return SchedulerChoice::kNone;
+  }
+  if (imuReady && !audioReady) {
+    return SchedulerChoice::kImuOnlyReady;
+  }
+  if (audioReady && !imuReady) {
+    return SchedulerChoice::kAudioOnlyReady;
+  }
+
+  const bool imuReserveReached =
+      bufferedBytes_ >=
+      config::kSdRamBufferBytes - config::kSdImuReservedCapacityBytes;
+  if (imuReserveReached) {
+    return SchedulerChoice::kImuReserve;
+  }
+  const bool audioReserveReached =
+      audioBufferedBytes_ >= config::kSdAudioRamBufferBytes -
+                                 config::kSdAudioReservedCapacityBytes;
+  if (audioReserveReached) {
+    return SchedulerChoice::kAudioReserve;
+  }
+  if (successfulAudioWritesSinceImu_ >=
+      config::kSdAudioWritesPerImuWrite) {
+    return SchedulerChoice::kImuQuota;
+  }
+  return SchedulerChoice::kAudioQuota;
+}
+
+void SdLogger::recordSchedulerChoice(SchedulerChoice choice,
+                                     bool writeSucceeded) {
+  switch (choice) {
+    case SchedulerChoice::kImuOnlyReady:
+      ++counters_.schedulerImuSelections;
+      ++counters_.schedulerImuOnlyReadySelections;
+      break;
+    case SchedulerChoice::kImuReserve:
+      ++counters_.schedulerImuSelections;
+      ++counters_.schedulerImuReserveSelections;
+      break;
+    case SchedulerChoice::kImuQuota:
+      ++counters_.schedulerImuSelections;
+      ++counters_.schedulerImuQuotaSelections;
+      break;
+    case SchedulerChoice::kAudioOnlyReady:
+      ++counters_.schedulerAudioSelections;
+      ++counters_.schedulerAudioOnlyReadySelections;
+      break;
+    case SchedulerChoice::kAudioReserve:
+      ++counters_.schedulerAudioSelections;
+      ++counters_.schedulerAudioReserveSelections;
+      break;
+    case SchedulerChoice::kAudioQuota:
+      ++counters_.schedulerAudioSelections;
+      ++counters_.schedulerAudioQuotaSelections;
+      break;
+    case SchedulerChoice::kNone:
+      return;
+  }
+
+  if (!writeSucceeded) {
+    return;
+  }
+  if (choice == SchedulerChoice::kImuOnlyReady ||
+      choice == SchedulerChoice::kImuReserve ||
+      choice == SchedulerChoice::kImuQuota) {
+    successfulAudioWritesSinceImu_ = 0;
+  } else if (successfulAudioWritesSinceImu_ < 0xFFU) {
+    ++successfulAudioWritesSinceImu_;
+  }
 }
 
 void SdLogger::discardEmptyPreallocation() {
