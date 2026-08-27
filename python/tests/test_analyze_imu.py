@@ -11,6 +11,7 @@ from analyze_imu import (
     analyze_file,
     calculate_timing,
     format_validation,
+    format_sensor_diagnostics,
     load_gyro_range_dps,
     plot_capture,
 )
@@ -41,6 +42,19 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertAlmostEqual(timing.min_period_ms, 10.0)
         self.assertAlmostEqual(timing.max_period_ms, 11.0)
 
+    def test_calculates_timing_across_multiple_rollovers(self):
+        timestamps = (0xF0000000, 0x40000000, 0x90000000, 0xE0000000,
+                      0x30000000, 0x80000000)
+        raw = b"".join(
+            make_packet(timestamp, sequence)
+            for sequence, timestamp in enumerate(timestamps)
+        )
+        packets, _ = parse_stream(raw)
+        timing = calculate_timing(packets)
+
+        self.assertIsNotNone(timing)
+        self.assertAlmostEqual(timing.duration_s, 6710.8864)
+
     def test_reports_crc_and_sequence_losses(self):
         damaged = bytearray(make_packet(11_000, 2))
         damaged[10] ^= 0x01
@@ -64,6 +78,16 @@ class AnalyzeImuTest(unittest.TestCase):
         self.assertEqual(len(packets), 3)
         self.assertIsNotNone(timing)
         self.assertEqual(diagnostics.accel_near_limit, (0, 0, 0))
+
+    def test_empty_capture_reports_unavailable_bmp_ranges(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.bin"
+            path.write_bytes(b"")
+            _, _, timing, diagnostics = analyze_file(path)
+
+        report = format_sensor_diagnostics(diagnostics, timing)
+        self.assertIn("bmp0_raw pressure=unavailable", report)
+        self.assertNotIn("4294967295..0", report)
 
     def test_preserves_v3_gyro_scale_from_metadata(self):
         with tempfile.TemporaryDirectory() as directory:

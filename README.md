@@ -35,19 +35,35 @@ contadores da aquisição e do SD.
 O formato completo está em
 `docs/DATA_FORMAT.md`.
 
+O microfone esta desativado na configuracao normal: I2S nao e inicializado e
+nenhum `audio.raw` e criado. O codigo de diagnostico do ICS43434 permanece no
+repositorio para retomada futura, sem participar da aquisicao atual.
+
 ## Sessões no cartão SD
 
-Com um cartão FAT ou exFAT conectado nos pinos documentados, cada boot cria uma
-nova pasta `/Sxxx`. O firmware não espera a USB e continua adquirindo sem
-computador. O arquivo `imu.bin` permanece aberto, recebe escritas em blocos a
-partir de um buffer RAM e faz flush periódico.
+Com um cartão FAT ou exFAT conectado nos pinos documentados, o firmware cria
+uma pasta `/Sxxx` no boot e mantem o mesmo `imu.bin` aberto continuamente ate
+o reboot ou uma falha confirmada do SD. Nao existe encerramento por tempo nem
+rotacao para outra pasta. O firmware nao espera a USB e funciona sem
+computador.
 
-Se o SD parar de aceitar escritas por uma janela completa, o firmware emite
+Se um arquivo do SD ficar dois segundos completos sem qualquer progresso de
+escrita, o firmware emite
 `SD_ERROR_CONFIRMED`, desativa a gravação até o reboot e, após cinco segundos,
 pisca duas vezes o LED laranja integrado. O LED compartilha o pino do clock SPI
 e só é controlado depois que o SPI foi encerrado com segurança.
 
+Para reduzir a carga e melhorar a margem elétrica, o SD opera a 12 MHz.
+`imu.bin` usa escritas completas de 512 bytes. A aquisicao dos sensores e
+consultada antes de qualquer operacao do SD. O arquivo recebe no boot uma
+prealocacao de dez minutos e cresce normalmente ao ultrapassar essa reserva.
+Flush e journal ocorrem a cada 1000 pacotes, aproximadamente dez segundos;
+`journal.bin` recebe um registro binario append-only com CRC e guarda o prefixo
+confirmado por `sync()`. Em queda de energia,
+o Python ignora a cauda prealocada e os dados posteriores ao ultimo journal.
+
 Depois de desligar a Teensy e remover o cartão, analise a sessão diretamente:
+ajuste a letra da unidade caso o Windows monte o cartão em outro caminho.
 
 ```powershell
 python python/parse_data.py E:/S001/imu.bin
@@ -100,3 +116,70 @@ Para estimar uma calibracao magnetica inicial depois de uma rotacao 3D ampla:
 ```powershell
 python python/calibrate_magnetometer.py data/rotacao_3d.bin
 ```
+
+## Diagnostico do microfone
+
+### Teste isolado microfone + SD
+
+`kAudioSdDiagnosticEnabled=true` ativa temporariamente um teste de dez
+minutos que inicializa somente o ICS43434 e o cartao SD. Nesse modo, o firmware
+nao inicializa `Wire`, PCA9548A, ICM-20948 ou BMP390 e nao cria pastas `/Sxxx`.
+Ele cria uma unica pasta `/Mxxx`, prealoca `audio.raw` antes de iniciar o I2S e
+nao faz rotacao automatica. Os primeiros cinco minutos usam escritas de 256
+bytes e os cinco seguintes usam 512 bytes, sem interrupcao ou nova
+prealocacao entre as fases. Ao fim, desliga a captura, drena o buffer, trunca
+o arquivo e emite `MIC_SD_TEST_COMPLETED`.
+
+Carregue e monitore:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --target upload --target monitor --upload-port COM3
+```
+
+Depois de `MIC_SD_TEST_COMPLETED`, desligue a Teensy, remova o cartao e use a
+letra atribuida pelo Windows:
+
+```powershell
+Get-Content E:/M001/status.txt
+Get-Content E:/M001/journal.txt
+python python/analyze_sd_blocks.py E:/M001
+python python/export_audio.py E:/M001
+ffplay data/M001_audio.wav
+```
+
+O resultado esperado e aproximadamente 600 segundos, zero falhas de escrita e,
+idealmente, zero blocos perdidos ou preenchidos com silencio. O analisador
+mostra histogramas de latencia separados, inspeciona cada metade do PCM em
+busca do padrao de bits altos observado no M002 e apresenta uma recomendacao
+provisoria. Para voltar ao firmware completo depois do teste, altere somente
+`kAudioSdDiagnosticEnabled=false`.
+
+`kMicrophoneDiagnosticEnabled=true` inicia somente o
+ICS43434 em RAM. SD, PCA9548A e sensores nao sao inicializados nesse modo. O
+monitor serial informa, a cada dois segundos, taxa efetiva, perdas da fila,
+uso de memoria, DC, RMS, clipping e atividade dos dois canais.
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run --target upload --target monitor --upload-port COM3
+```
+
+O teste deve incluir alguns segundos em silencio, fala em nivel normal e sons
+fortes sem encostar no microfone. O canal esperado e o esquerdo porque `SEL`
+esta ligado ao GND.
+
+Na configuracao normal, `kMicrophoneDiagnosticEnabled=false`,
+`kAudioSdDiagnosticEnabled=false` e `kMicrophoneRecordingEnabled=false`.
+Os modos de audio devem ser habilitados apenas para diagnosticos dedicados.
+
+O arquivo cru tambem pode ser ouvido diretamente com FFplay 8 usando
+`-ch_layout mono`:
+
+```powershell
+ffplay -f s16le -ar 44100 -ch_layout mono "E:/M001/audio.raw"
+```
+
+Para audio de baixo nivel, prefira `python/export_audio.py --gain-db 18`.
+O ganho afeta somente o WAV de reproducao; `audio.raw` permanece inalterado.
+O exportador informa `peak_safe_gain_db` e avisa quando o ganho escolhido
+produz clipping; nao se deve amplificar uma captura que ja esteja proxima da
+escala completa.

@@ -6,23 +6,91 @@ namespace pet::config {
 
 constexpr uint32_t kSerialBaud = 115200;
 constexpr bool kUsbBinaryStreamEnabled = false;
+constexpr bool kMicrophoneDiagnosticEnabled = false;
+constexpr bool kAudioSdDiagnosticEnabled = false;
+constexpr bool kMicrophoneRecordingEnabled = false;
+constexpr uint32_t kMicrophoneDiagnosticReportMs = 2000;
+constexpr uint8_t kMicrophoneAudioMemoryBlocks = 48;
+constexpr uint16_t kMicrophoneQueueBlocks = 512;
+constexpr uint32_t kMicrophoneSampleRateHz = 44100;
+constexpr uint16_t kMicrophoneBlockSamples = 128;
+constexpr uint8_t kMicrophoneChannels = 1;
+constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
-constexpr char kFirmwareVersion[] = "0.2.0";
+constexpr char kFirmwareVersion[] = "0.5.1";
 
 constexpr size_t kSdRamBufferBytes = 8192;
-constexpr size_t kSdWriteBlockBytes = 512;
+constexpr size_t kSdAudioRamBufferBytes = 32768;
+constexpr size_t kSdImuWriteBlockBytes = 512;
+constexpr size_t kSdAudioWriteBlockBytes = 512;
+constexpr uint8_t kSdSpiClockMHz = 12;
+constexpr uint64_t kSdFreeSpaceReserveBytes = 4ULL * 1024ULL * 1024ULL;
+constexpr uint32_t kSdMinimumRecordingSeconds = 60;
+constexpr bool kSdContinuousSessionEnabled = true;
+constexpr uint32_t kSdPreallocationSeconds = 10U * 60U;
+constexpr bool kSdRotateSessions = false;
+constexpr uint32_t kSdPreallocationMarginSeconds = 1;
 constexpr uint32_t kSdPacketsPerFlush = 1000;
+constexpr uint32_t kSdPacketsPerJournalUpdate = kSdPacketsPerFlush;
 constexpr uint32_t kSdPacketsPerStatusUpdate = 18000;
 constexpr uint32_t kSdHealthWindowMs = 2000;
 constexpr uint32_t kSdWriteRetryMs = 20;
 constexpr uint32_t kSdFailureLedDelayMs = 5000;
+constexpr bool kSdFailureIndicatorEnabled = true;
 constexpr uint32_t kSdFailureLedCycleMs = 1200;
 constexpr uint32_t kSdFailureLedPulseMs = 150;
 constexpr uint32_t kSdFailureLedSecondPulseMs = 300;
 constexpr uint32_t kSdSlowOperationThresholdUs = 10000;
-static_assert(kSdRamBufferBytes % kSdWriteBlockBytes == 0,
+constexpr uint8_t kSdAudioWritesPerImuWrite = 11;
+constexpr size_t kSdImuReservedCapacityBytes = 4U * kSdImuWriteBlockBytes;
+constexpr size_t kSdAudioReservedCapacityBytes =
+    16U * kSdAudioWriteBlockBytes;
+constexpr size_t kSdMaintenanceMaxImuBufferedBytes =
+    2U * kSdImuWriteBlockBytes;
+constexpr size_t kSdMaintenanceMaxAudioBufferedBytes =
+    8U * kSdAudioWriteBlockBytes;
+static_assert(kSdRamBufferBytes % kSdImuWriteBlockBytes == 0,
               "SD RAM buffer must contain complete write blocks");
+static_assert(kSdAudioRamBufferBytes % kSdAudioWriteBlockBytes == 0,
+              "audio SD RAM buffer must contain complete write blocks");
+static_assert(kMicrophoneBlockSamples * sizeof(int16_t) <=
+                  kSdAudioRamBufferBytes,
+              "audio SD buffer must contain a complete audio block");
+static_assert(kSdImuReservedCapacityBytes < kSdRamBufferBytes,
+              "IMU reservation must leave writable buffer capacity");
+static_assert(kSdAudioReservedCapacityBytes < kSdAudioRamBufferBytes,
+              "audio reservation must leave writable buffer capacity");
+static_assert(kSdMaintenanceMaxImuBufferedBytes <=
+                  kSdRamBufferBytes - kSdImuReservedCapacityBytes,
+              "IMU maintenance threshold must be below urgency threshold");
+static_assert(kSdMaintenanceMaxAudioBufferedBytes <=
+                  kSdAudioRamBufferBytes - kSdAudioReservedCapacityBytes,
+              "audio maintenance threshold must be below urgency threshold");
+
+constexpr uint32_t kAudioPreflightDurationMs = 2000;
+constexpr int32_t kAudioPreflightMaximumAbsMeanCounts = 1024;
+constexpr uint32_t kAudioPreflightMaximumRmsCounts = 4096;
+constexpr uint32_t kAudioPreflightMaximumClippingPpm = 100;
+
+constexpr uint32_t kAudioSdDiagnosticPhaseSeconds = 5U * 60U;
+constexpr uint32_t kAudioSdDiagnosticDurationSeconds =
+    2U * kAudioSdDiagnosticPhaseSeconds;
+constexpr size_t kAudioSdDiagnosticBlockBytes[] = {256U, 512U};
+constexpr size_t kAudioSdDiagnosticPhaseCount =
+    sizeof(kAudioSdDiagnosticBlockBytes) /
+    sizeof(kAudioSdDiagnosticBlockBytes[0]);
+constexpr uint32_t kAudioSdDiagnosticFlushSeconds = 10U;
+constexpr uint32_t kAudioSdDiagnosticJournalSeconds = 30U;
+static_assert(kAudioSdDiagnosticPhaseCount == 2,
+              "audio SD benchmark requires two phases");
+static_assert(kSdAudioRamBufferBytes % kAudioSdDiagnosticBlockBytes[0] == 0 &&
+                  kSdAudioRamBufferBytes %
+                          kAudioSdDiagnosticBlockBytes[1] ==
+                      0,
+              "audio SD buffer must contain complete benchmark blocks");
+static_assert(!(kMicrophoneDiagnosticEnabled && kAudioSdDiagnosticEnabled),
+              "enable only one microphone diagnostic mode");
 
 constexpr uint8_t kPca9548aAddress = 0x70;
 constexpr uint16_t kPcaChannelSettleUs = 80;

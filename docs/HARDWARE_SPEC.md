@@ -53,6 +53,11 @@ GND - GND
 
 SEL ficará permanentemente em GND (canal esquerdo).
 
+Na Teensy 4.0, a Audio Library oficial usa `BCLK=21`, `LRCLK=20` e entrada I2S
+`RX=8`. O modo mestre gera 44100 amostras por segundo em slots estereo de 32
+bits. O diagnostico inicial observa as duas portas da biblioteca para confirmar
+que o sinal do ICS43434 aparece somente no canal esquerdo.
+
 - Sensores conectados ao PCA9548A:
 Canal 0: ICM20948 #0
 

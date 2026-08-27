@@ -90,20 +90,15 @@ PBIC/
 
 /S001/
 ├── imu.bin
-├── audio.raw
 ├── meta.txt
-└── status.txt
-
-/S002/
-├── imu.bin
-├── audio.raw
-├── meta.txt
+├── journal.bin
 └── status.txt
 
 session.txt: Fica na raiz do cartão e guarda o número da última sessão
 imu.bin: Contém os pacotes binários das IMUs e barômetros.
-audio.raw: Contém apenas amostras do microfone
 meta.txt: Descreve a sessão e a configuração.
+journal.bin: Guarda checkpoints binarios append-only com CRC.
+status.txt: Guarda contadores e latências do firmware.
 
 "Exemplo:
 
@@ -148,11 +143,31 @@ binário permanecer desabilitado. Com SD válido, o contador persistente
 durante a sessão.
 
 Os pacotes v4 de 79 bytes entram em uma fila circular de 8192 bytes. O logger
-escreve blocos de até 512 bytes depois da aquisição, faz flush a cada 1000
-pacotes e atualiza `status.txt` a cada 18000 pacotes, ou três minutos. O status
-é substituído por arquivo temporário para evitar texto parcialmente reescrito.
-Uma janela de dois segundos exige pelo menos uma escrita bem-sucedida quando
-houve tentativas; uma janela inteira sem sucesso desativa somente o logger.
+escreve somente `imu.bin`, em blocos completos de 512 bytes, e executa no
+maximo uma operacao de SD por passagem do loop. O SPI opera a 12 MHz. O
+microfone esta desabilitado na configuracao normal: I2S nao e inicializado,
+`audio.raw` nao e criado e a arbitragem entre IMU e audio permanece apenas no
+codigo experimental.
+
+`main` consulta a aquisicao imediatamente antes de chamar o logger. Assim, uma
+rodada ja vencida e executada antes de qualquer nova operacao SD. Uma chamada
+sincrona ja iniciada no SdFat nao pode ser interrompida, portanto as latencias
+maximas do cartao continuam sendo medidas.
+
+Flush nao drena a fila. `imu.bin` recebe `sync()` a cada 1000 pacotes, cerca de
+dez segundos, somente quando ha no maximo 1024 bytes aguardando. O journal e
+atualizado logo depois e publica apenas os bytes confirmados pelo ultimo
+`sync()` bem-sucedido. `journal.bin` permanece aberto e recebe registros fixos
+de 32 bytes por append, sem criar, remover ou renomear arquivos durante a
+aquisicao. Um CRC-8 permite ao Python ignorar um ultimo registro incompleto ou
+corrompido. `status.txt` registra as escolhas do caminho IMU e as operacoes de
+manutencao.
+
+A recuperação é medida separadamente por arquivo. Uma escrita sem nenhum byte
+de progresso inicia um período de dois segundos; qualquer escrita posterior
+com progresso cancela esse período. Somente dois segundos completos sem
+progresso confirmam a falha. Isso evita que uma única falha após uma operação
+longa seja interpretada como uma janela inteira de cartão indisponível.
 
 Uma falha definitiva emite `SD_ERROR_CONFIRMED` uma única vez pela Serial e
 desativa a gravação até o próximo reboot. Cinco segundos depois, o firmware
@@ -204,6 +219,11 @@ O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
 sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto
 `src/utils/packet` e `src/utils/crc8` fazem sua montagem e validação. O contrato
 com o Python está documentado em `docs/DATA_FORMAT.md`.
+
+`src/utils/time_utils.h` centraliza a aritmetica modular de `micros()` e inclui
+`static_assert` cobrindo deadlines antes e depois do retorno de `uint32` a
+zero. As ferramentas Python acumulam deltas consecutivos para representar
+sessoes que atravessam mais de um rollover de aproximadamente 71,6 minutos.
 
 ## Diagnóstico inicial dos AK09916
 
@@ -269,3 +289,154 @@ sobre toda a sessão, mas limita os pontos mantidos para gráficos. A ferramenta
 `python/calibrate_magnetometer.py` produz uma estimativa inicial de hard-iron e
 soft-iron diagonal somente quando a captura cobre rotação suficiente nos três
 eixos.
+
+## Diagnostico inicial do ICS43434
+
+O diagnostico usa `AudioInputI2S` da Audio Library 1.3 fornecida pelo core
+Teensyduino 1.62, sem dependencia externa no `platformio.ini`. A implementacao
+oficial para Teensy 4.x fixa `BCLK=21`, `LRCLK=20` e `RX=8`; o breakout mantem
+`SEL=GND`, portanto o sinal deve aparecer na porta esquerda. Fontes primarias:
+
+- https://www.pjrc.com/teensy/gui/index.html?info=AudioInputI2S
+- https://github.com/PaulStoffregen/Audio
+- https://cdn-shop.adafruit.com/product-files/6049/6049_DS-000069-ICS-43434-v1.2.pdf
+
+A biblioteca trabalha a 44100 Hz, em blocos de 128 amostras `int16`. O SAI
+recebe slots I2S de 32 bits, mas o DMA oficial copia apenas os 16 bits mais
+significativos de cada canal. Assim, os oito bits menos significativos da
+amostra nativa de 24 bits do ICS43434 nao ficam disponiveis nesse caminho.
+
+O modo `kMicrophoneDiagnosticEnabled=true` e isolado: nao inicializa SD, I2C ou
+os demais sensores e nao cria arquivos. Um destino `AudioStream` proprio copia
+os canais esquerdo e direito para uma fila circular em RAM com 16 blocos e
+conta explicitamente overflow e blocos incompletos. O loop calcula taxa real,
+DC, RMS AC, faixa, clipping, bits ocupados no container PCM16, atividade do LSB,
+uso de memoria e CPU. A escolha entre armazenar PCM16 ou implementar um caminho
+DMA de 24/32 bits sera feita depois dos resultados do hardware.
+
+O diagnostico em hardware confirmou cerca de 44100 amostras/s, sinal somente
+no canal esquerdo, DC proximo de zero e nenhuma perda da fila em 40 segundos.
+Sons usuais ocuparam ate 14 bits do PCM16; por isso o formato inicial de coleta
+e PCM mono `int16` little-endian. Os 24 bits nativos continuam sendo uma opcao
+futura, mas nao justificam neste momento substituir o DMA oficial e estavel.
+
+## Captura e gravacao de audio experimental
+
+Esta implementacao esta preservada para ensaios futuros, mas nao participa do
+firmware normal IMU-only. Com `kMicrophoneRecordingEnabled=false`, o I2S nao e
+inicializado e nenhum arquivo de audio e aberto ou prealocado em `/Sxxx`.
+
+`src/services/audio_capture` usa `AudioInputI2S`, cujo recebimento no Teensy
+4.0 e feito por DMA, e conecta apenas a porta esquerda a um `AudioStream`
+proprio. O callback copia blocos de 128 amostras para uma fila circular mono e
+conta blocos recebidos, overflow, blocos incompletos e maior ocupacao. O
+processamento nao usa `float` nem grava no SD dentro da interrupcao.
+
+O loop transfere os blocos para uma segunda fila de 32768 bytes pertencente ao
+`sd_logger`. A fila de captura tem 511 posicoes uteis, aproximadamente 132 KiB;
+juntas oferecem aproximadamente 1,85 s de reserva a 44100 Hz. O logger mantem
+`imu.bin` e `audio.raw` abertos ao mesmo tempo e escreve o audio em blocos de
+ate 512 bytes. Flush, escrita e falha do audio possuem contadores e latencias
+separados em `status.txt`. A janela de saude acompanha sucesso de cada arquivo
+separadamente, evitando que `imu.bin` mascare uma falha de `audio.raw` ou o
+inverso.
+
+Antes de abrir a sessao, a captura mede dois segundos de sinal em RAM com o
+ambiente em silencio. Media DC, RMS, pico e clipping sao registrados em
+`meta.txt`. Valores acima dos limites de silencio emitem
+`AUDIO_PREFLIGHT_WARNING`, mas nao bloqueiam a captura: eles podem refletir
+fala ou ruido ambiental no boot e o projeto precisa preservar o sinal cru.
+Somente ausencia de blocos validos emite `AUDIO_CAPTURE_REJECTED`. O firmware
+nao tenta corrigir saturacao com ganho ou filtro digital.
+
+Cada bloco de audio recebe um timestamp apenas na fila RAM. O valor nao altera
+o PCM em `audio.raw`, mas permite registrar no journal o primeiro bloco exato
+de cada sessao rotacionada. `meta.txt` registra formato, taxa e configuracao;
+`journal.txt` e a referencia mais atual para timestamp e tamanhos validos.
+
+No firmware normal, `FsFile::preAllocate()` reserva inicialmente 4.747.900
+bytes para `imu.bin`, equivalentes a dez minutos mais um segundo de margem. A
+sessao nao termina ao atingir essa reserva: o mesmo arquivo cresce e permanece
+aberto ate reboot ou falha confirmada do cartao. Depois da validacao, a reserva
+planejada de quatro horas sera 113.767.900 bytes; essa mudanca exige apenas
+alterar `kSdPreallocationSeconds`, sem criar rotacao automatica.
+
+Cada callback DMA atribui uma sequencia ao bloco, inclusive quando nao ha bloco
+valido disponivel. Se a fila de captura transbordar ou um callback ficar
+incompleto, o logger detecta o salto e insere a quantidade equivalente de
+blocos zerados antes do proximo bloco real. O PCM preserva duracao e
+alinhamento, mas o silencio sintetico nao recupera o sinal perdido. Os totais,
+eventos e maior gap ficam em `journal.txt` e `status.txt` e sao apresentados por
+`python/export_audio.py`.
+
+No primeiro boot, a prealocacao ocorre antes de ativar o I2S. Assim, o
+preflight mede o microfone depois do maior pico inicial de atividade do SD.
+Durante uma rotacao, o primeiro bloco real retirado da fila permanece pendente
+ate que todo silencio necessario caiba no buffer do SD. O inicio logico da nova
+sessao e o instante em que a anterior atingiu seu limite, nao o final da
+prealocacao. Flush, truncamento, journal e status finais avancam como etapas
+separadas, uma por passagem do loop. A prealocacao SdFat ainda e uma chamada
+sincrona; a fila DMA cobre essa pausa e qualquer excesso e representado por
+silencio, sem encurtar a linha do tempo do audio.
+
+O journal e escrito apos o primeiro flush, por volta de dez segundos, e depois
+a cada 3000 pacotes, aproximadamente 30 segundos. Uma sessao interrompida pode
+manter a cauda fisica prealocada, mas `parse_data.py`, `analyze_imu.py` e
+`export_audio.py` limitam a leitura aos tamanhos confirmados.
+
+Capturas reais mostraram dois estados distintos do sinal. S010 ficou em cerca
+de `-51,7 dBFS` RMS, sem ruido aparente; S013 iniciou e permaneceu saturado,
+com `-13,3 dBFS` RMS e picos em escala completa. Como a saturacao ja existia
+nos primeiros segundos, ela nao foi causada pela falha posterior do SD. O
+firmware nao aplica ganho digital; alimentacao, GND, DOUT e sincronismo de boot
+do breakout ainda precisam ser validados antes de aceitar uma sessao de audio.
+
+O S017 confirmou uma segunda causa independente: o volume terminou com apenas
+1024 bytes livres. O logger mede os clusters no boot e reserva 4 MiB. Antes de
+cada rotacao, verifica se ha espaco para a proxima prealocacao completa; falta
+de espaco e reportada antes de iniciar novos fluxos.
+
+No teste S007, o preflight anterior a prealocacao estava limpo, mas a gravacao
+degradou de aproximadamente `-65 dBFS` no primeiro meio segundo para ruido com
+DC e clipping durante a atividade do SD. A sessao tambem descartou 18764
+pacotes IMU porque ambas as filas ficaram cheias. A versao 0.4.1 altera a ordem
+de boot e a prioridade das filas; se o novo preflight ou a gravacao continuarem
+ruidosos, a causa restante e eletrica entre SD e I2S e exige validacao de
+alimentacao, GND e roteamento dos fios.
+
+## Diagnostico isolado de audio no SD
+
+O servico `src/services/audio_sd_diagnostic` existe para separar o caminho
+ICS43434/DMA/SD da aquisicao I2C. Com `kAudioSdDiagnosticEnabled=true`, `main`
+retorna antes de inicializar `Wire`, PCA9548A, ICM-20948 e BMP390. O teste cria
+uma pasta `/Mxxx`, prealoca uma unica janela de dez minutos e nao rotaciona
+arquivos. Assim, nenhuma prealocacao ocorre durante a captura.
+
+O caminho isolado preserva PCM16 mono a 44100 Hz, sequencia DMA e zero-fill de
+gaps. A mesma captura continua por duas fases de cinco minutos: 256 bytes por
+escrita na primeira e 512 bytes na segunda. Nao ha flush, reinicio de I2S ou
+prealocacao na transicao. Faz `sync()` a cada dez segundos e atualiza o journal
+a cada trinta segundos. No limite de dez minutos, desliga a origem I2S, drena a
+fila, sincroniza, trunca e grava o status final. Esse modo e temporario e
+mutuamente exclusivo com o diagnostico I2S somente em RAM.
+
+Cada fase possui contadores proprios de escritas, falhas, gaps, silencio
+inserido, ocupacao do buffer e histograma de latencia nas faixas `<1`, `1-2`,
+`2-5`, `5-10`, `10-20`, `20-50`, `50-100` e `>=100 ms`. O script
+`python/analyze_sd_blocks.py` compara as fases, analisa RMS, picos e ocorrencias
+proximas de `+/-16384` e `+/-32768`, e indica provisoriamente o menor bloco sem
+falhas, gaps, escritas de pelo menos 100 ms ou assinatura PCM suspeita. O
+resultado em hardware decide o bloco do logger integrado. O M002 rejeitou 1024
+e 2048 bytes por corrupcao PCM, apesar de zero falhas e gaps no transporte.
+O M004 validou audio inteligivel com 256 e 512 bytes. A fase de 512 bytes
+reduziu pela metade as chamadas ao SD e teve menor latencia maxima; por isso o
+logger integrado permanece em 512 bytes. Dois gaps isolados de um bloco nessa
+fase continuam sendo tratados como contingencia.
+
+S012 demonstrou que a continuidade de audio foi preservada por zero-fill:
+300,008 s, 76 blocos perdidos em 50 eventos e maior gap de quatro blocos. No
+entanto, a politica integrada priorizou audio em 51567 escritas e descartou
+23551 pacotes IMU. Portanto, essa perda IMU ocorreu por starvation no
+agendador integrado, nao por falta de espaco ou apenas pela prealocacao da
+sessao seguinte. O teste `/Mxxx` deve determinar separadamente se ainda existem
+perdas ou ruido sem qualquer transacao I2C.

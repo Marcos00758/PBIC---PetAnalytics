@@ -245,11 +245,17 @@ def format_sensor_diagnostics(
         )
     for sensor in range(2):
         update_rate = diagnostics.bmp_changes[sensor] / duration if duration else 0.0
+        pressure_min, pressure_max = diagnostics.bmp_pressure_ranges[sensor]
+        temperature_min, temperature_max = diagnostics.bmp_temperature_ranges[sensor]
+        if pressure_min == 0xFFFFFFFF:
+            pressure_range = "unavailable"
+            temperature_range = "unavailable"
+        else:
+            pressure_range = f"{pressure_min}..{pressure_max}"
+            temperature_range = f"{temperature_min}..{temperature_max}"
         lines.append(
-            f"bmp{sensor}_raw pressure={diagnostics.bmp_pressure_ranges[sensor][0]}.."
-            f"{diagnostics.bmp_pressure_ranges[sensor][1]} temperature="
-            f"{diagnostics.bmp_temperature_ranges[sensor][0]}.."
-            f"{diagnostics.bmp_temperature_ranges[sensor][1]} "
+            f"bmp{sensor}_raw pressure={pressure_range} "
+            f"temperature={temperature_range} "
             f"changes={diagnostics.bmp_changes[sensor]} "
             f"change_rate_hz={update_rate:.3f} "
             f"invalid_packets={diagnostics.bmp_invalid_packets[sensor]}"
@@ -315,8 +321,14 @@ def plot_capture(
             "pip install -r python/requirements.txt"
         ) from exc
 
-    first_timestamp = packets[0].packet.timestamp_us
-    times_s = [elapsed_us(first_timestamp, item.packet.timestamp_us) / 1_000_000 for item in packets]
+    times_s = []
+    elapsed = 0
+    previous_timestamp = None
+    for item in packets:
+        if previous_timestamp is not None:
+            elapsed += elapsed_us(previous_timestamp, item.packet.timestamp_us)
+        times_s.append(elapsed / 1_000_000)
+        previous_timestamp = item.packet.timestamp_us
     physical = [
         item.packet.physical_values(mag_calibrations, gyro_range_dps)
         for item in packets
