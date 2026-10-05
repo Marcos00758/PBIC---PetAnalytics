@@ -1,0 +1,216 @@
+#pragma once
+
+#include <Arduino.h>
+#include <SD.h>
+
+#include "config/constants.h"
+#include "data/imu_packet.h"
+#include "data/sd_journal.h"
+#include "drivers/bmp390.h"
+#include "services/audio_capture.h"
+#include "services/imu_acquisition.h"
+
+namespace pet::services {
+
+struct SdSessionMetadata {
+  bool icmReady[data::kIcmCount] = {false, false, false};
+  bool bmpReady[data::kBmpCount] = {false, false};
+  bool bmpNvmValid[data::kBmpCount] = {false, false};
+  uint8_t bmpAddress[data::kBmpCount] = {0, 0};
+  uint8_t bmpNvm[data::kBmpCount][drivers::kBmp390NvmLength]{};
+  bool audioEnabled = false;
+  bool audioStartTimestampValid = false;
+  uint32_t audioStartTimestampUs = 0;
+  AudioPreflightResult audioPreflight{};
+};
+
+struct SdLoggerCounters {
+  uint32_t packetsQueued = 0;
+  uint32_t packetsDropped = 0;
+  uint64_t bytesWritten = 0;
+  uint32_t writeAttempts = 0;
+  uint32_t writeSuccesses = 0;
+  uint32_t writeFailures = 0;
+  uint32_t partialWrites = 0;
+  uint32_t flushes = 0;
+  uint32_t maxWriteDurationUs = 0;
+  uint32_t maxFlushDurationUs = 0;
+  uint32_t maxStatusDurationUs = 0;
+  uint32_t slowWrites = 0;
+  uint32_t slowFlushes = 0;
+  uint32_t slowStatusUpdates = 0;
+  uint32_t maxBufferedBytes = 0;
+  uint32_t audioBlocksQueued = 0;
+  uint32_t audioBlocksDropped = 0;
+  uint32_t audioSilenceBlocksInserted = 0;
+  uint32_t audioGapEvents = 0;
+  uint32_t maxAudioGapBlocks = 0;
+  uint32_t audioBytesWritten = 0;
+  uint32_t audioWriteAttempts = 0;
+  uint32_t audioWriteSuccesses = 0;
+  uint32_t audioWriteFailures = 0;
+  uint32_t audioPartialWrites = 0;
+  uint32_t audioFlushes = 0;
+  uint32_t maxAudioWriteDurationUs = 0;
+  uint32_t maxAudioFlushDurationUs = 0;
+  uint32_t slowAudioWrites = 0;
+  uint32_t slowAudioFlushes = 0;
+  uint32_t maxAudioBufferedBytes = 0;
+  uint32_t journalUpdates = 0;
+  uint32_t maxJournalDurationUs = 0;
+  uint32_t slowJournalUpdates = 0;
+  uint32_t maxPreallocationDurationUs = 0;
+  uint32_t schedulerImuSelections = 0;
+  uint32_t schedulerAudioSelections = 0;
+  uint32_t schedulerImuOnlyReadySelections = 0;
+  uint32_t schedulerImuReserveSelections = 0;
+  uint32_t schedulerImuQuotaSelections = 0;
+  uint32_t schedulerAudioOnlyReadySelections = 0;
+  uint32_t schedulerAudioReserveSelections = 0;
+  uint32_t schedulerAudioQuotaSelections = 0;
+  uint32_t schedulerMaintenanceOperations = 0;
+};
+
+class SdLogger {
+ public:
+  bool beginCard();
+  bool beginSession(const SdSessionMetadata& metadata,
+                    const AcquisitionCounters& acquisitionCounters,
+                    const AudioCaptureCounters& audioCounters);
+  bool finalizeInitialSessionSetup(
+      const SdSessionMetadata& metadata,
+      const AcquisitionCounters& acquisitionCounters,
+      const AudioCaptureCounters& audioCounters);
+  bool enqueue(const data::ImuPacket& packet);
+  bool enqueueAudio(const AudioPcmBlock& block);
+  bool canEnqueueAudioBlock() const;
+  void service(const AcquisitionCounters& acquisitionCounters,
+               const AudioCaptureCounters& audioCounters);
+  void updateFailureIndicator();
+
+  bool cardReady() const { return cardReady_; }
+  bool sessionActive() const { return sessionActive_; }
+  bool failureConfirmed() const { return failureConfirmed_; }
+  uint32_t sessionNumber() const { return sessionNumber_; }
+  const char* sessionFolder() const { return sessionFolder_; }
+  uint64_t freeBytesAtBoot() const { return freeBytesAtBoot_; }
+  uint64_t recordingBudgetBytes() const { return recordingBudgetBytes_; }
+  uint32_t estimatedRecordingSeconds() const {
+    return estimatedRecordingSeconds_;
+  }
+  const SdLoggerCounters& counters() const { return counters_; }
+
+ private:
+  enum class SchedulerChoice : uint8_t {
+    kNone,
+    kImuOnlyReady,
+    kImuReserve,
+    kImuQuota,
+    kAudioOnlyReady,
+    kAudioReserve,
+    kAudioQuota,
+  };
+
+  enum class FinalizeStage : uint8_t {
+    kIdle,
+    kFlushImu,
+    kFlushAudio,
+    kTruncateImu,
+    kTruncateAudio,
+    kJournal,
+    kStatus,
+    kCloseAndRotate,
+  };
+
+  bool verifyReadWrite();
+  bool chooseSessionNumber();
+  bool persistSessionNumber();
+  bool writeMetadata(const SdSessionMetadata& metadata);
+  bool openAndPreallocateDataFiles();
+  bool hasSpaceForNextSession();
+  bool writeJournal(const char* state);
+  bool writeStatus(const AcquisitionCounters& acquisitionCounters,
+                   const AudioCaptureCounters& audioCounters,
+                   const char* state);
+  bool appendAudioSamples(const int16_t* samples);
+  bool writeBufferedBytes(bool allowPartialBlock);
+  bool writeAudioBufferedBytes(bool allowPartialBlock);
+  bool flushImuFile();
+  bool flushAudioFile();
+  bool maintenanceSafe() const;
+  bool performPendingMaintenance(
+      const AcquisitionCounters& acquisitionCounters,
+      const AudioCaptureCounters& audioCounters);
+  SchedulerChoice chooseWrite(bool imuReady, bool audioReady) const;
+  void recordSchedulerChoice(SchedulerChoice choice, bool writeSucceeded);
+  void discardEmptyPreallocation();
+  void advanceBuffer(size_t count);
+  void advanceAudioBuffer(size_t count);
+  void checkWriteFailureTimeout();
+  void requestSessionStop(const char* reason);
+  void finishSession(const AcquisitionCounters& acquisitionCounters,
+                     const AudioCaptureCounters& audioCounters);
+  void confirmCardFailure(const char* reason);
+  void recordOperationDuration(uint32_t durationUs, uint32_t& maximumUs,
+                               uint32_t& slowOperations);
+  void buildPath(char* destination, size_t length, const char* filename) const;
+
+  FsFile imuFile_;
+  FsFile audioFile_;
+  FsFile journalFile_;
+  uint8_t buffer_[config::kSdRamBufferBytes]{};
+  uint8_t audioBuffer_[config::kSdAudioRamBufferBytes]{};
+  uint8_t writeScratch_[config::kSdImuWriteBlockBytes >
+                                config::kSdAudioWriteBlockBytes
+                            ? config::kSdImuWriteBlockBytes
+                            : config::kSdAudioWriteBlockBytes]{};
+  size_t bufferHead_ = 0;
+  size_t bufferTail_ = 0;
+  size_t bufferedBytes_ = 0;
+  size_t audioBufferHead_ = 0;
+  size_t audioBufferTail_ = 0;
+  size_t audioBufferedBytes_ = 0;
+  uint32_t sessionNumber_ = 0;
+  char sessionFolder_[16]{};
+  uint32_t packetsAtLastFlush_ = 0;
+  uint32_t packetsAtLastJournal_ = 0;
+  uint32_t packetsAtLastStatus_ = 0;
+  uint32_t journalSequence_ = 0;
+  uint64_t imuDurableBytes_ = 0;
+  uint32_t audioDurableBytes_ = 0;
+  uint32_t nextAudioSequence_ = 0;
+  uint8_t successfulAudioWritesSinceImu_ = 0;
+  bool audioSequenceInitialized_ = false;
+  bool audioGapInProgress_ = false;
+  bool imuFlushPending_ = false;
+  bool audioFlushPending_ = false;
+  bool journalPending_ = false;
+  bool statusPending_ = false;
+  FinalizeStage finalizeStage_ = FinalizeStage::kIdle;
+  uint32_t nextWriteRetryMs_ = 0;
+  uint32_t imuWriteFailureStartedMs_ = 0;
+  uint32_t audioWriteFailureStartedMs_ = 0;
+  bool imuWriteFailureActive_ = false;
+  bool audioWriteFailureActive_ = false;
+  bool cardReady_ = false;
+  bool sessionActive_ = false;
+  bool failureConfirmed_ = false;
+  bool failureIndicatorReady_ = false;
+  uint32_t failureConfirmedAtMs_ = 0;
+  uint32_t sessionStartedMs_ = 0;
+  uint32_t stopRequestedAtMs_ = 0;
+  uint64_t freeBytesAtBoot_ = 0;
+  uint64_t recordingBudgetBytes_ = 0;
+  uint32_t estimatedRecordingSeconds_ = 0;
+  uint64_t imuPreallocatedBytes_ = 0;
+  uint64_t audioPreallocatedBytes_ = 0;
+  uint32_t audioFirstTimestampUs_ = 0;
+  bool audioFirstTimestampValid_ = false;
+  bool stopRequested_ = false;
+  const char* stopReason_ = nullptr;
+  SdSessionMetadata sessionMetadata_{};
+  AudioCaptureCounters audioCountersAtSessionStart_{};
+  SdLoggerCounters counters_{};
+};
+
+}  // namespace pet::services

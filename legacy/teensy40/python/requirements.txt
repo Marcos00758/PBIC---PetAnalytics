@@ -1,0 +1,5 @@
+pyserial>=3.5,<4
+matplotlib>=3.7,<4
+numpy>=1.24,<3
+pyqtgraph>=0.13,<0.15
+PyQt6>=6.5,<7

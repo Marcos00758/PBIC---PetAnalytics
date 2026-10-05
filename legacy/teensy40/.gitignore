@@ -12,6 +12,4 @@ Thumbs.db
 
 # Experimental data
 /data/
-# Local experimental backup; keep its manifest versioned.
-/legacy/teensy40/experimental-data.zip
 *.raw

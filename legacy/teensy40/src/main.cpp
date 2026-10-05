@@ -1,0 +1,479 @@
+#include <Arduino.h>
+#include <Wire.h>
+
+#include "config/constants.h"
+#include "config/pins.h"
+#include "data/imu_packet.h"
+#include "drivers/bmp390.h"
+#include "drivers/ics43434.h"
+#include "drivers/icm20948.h"
+#include "drivers/pca9548a.h"
+#include "services/i2c_scan_diagnostic.h"
+#include "services/imu_acquisition.h"
+#include "services/audio_capture.h"
+#include "services/audio_sd_diagnostic.h"
+#include "services/presentation_stream.h"
+#include "services/sd_logger.h"
+
+namespace {
+
+pet::drivers::Pca9548a mux(Wire, pet::config::kPca9548aAddress,
+                           pet::config::kPcaChannelSettleUs);
+pet::drivers::Icm20948 icm0(mux, Wire, pet::config::kIcm0Channel, 100);
+pet::drivers::Icm20948 icm1(mux, Wire, pet::config::kIcm1Channel, 110);
+pet::drivers::Icm20948 icm2(mux, Wire, pet::config::kIcm2Channel, 120);
+pet::drivers::Icm20948* const icms[] = {&icm0, &icm1, &icm2};
+pet::drivers::Bmp390 bmp0(mux, Wire, pet::config::kBmp0Channel);
+pet::drivers::Bmp390 bmp1(mux, Wire, pet::config::kBmp1Channel);
+pet::drivers::Bmp390* const bmps[] = {&bmp0, &bmp1};
+pet::services::ImuAcquisition acquisition(
+    icm0, icm1, icm2, bmp0, bmp1, pet::config::kImuSamplePeriodUs,
+    pet::config::kBmpSamplesPerImuSample,
+    pet::config::kMagSamplesPerImuSample);
+pet::services::SdLogger sdLogger;
+pet::drivers::Ics43434Diagnostic microphoneDiagnostic;
+pet::services::AudioCapture audioCapture;
+pet::services::AudioSdDiagnostic audioSdDiagnostic;
+pet::services::PresentationStream presentationStream(mux, icm0, icm1, icm2,
+                                                     bmp0, bmp1, acquisition);
+pet::services::I2cScanDiagnostic i2cScanDiagnostic;
+
+bool acquisitionReady = false;
+pet::services::AudioPcmBlock pendingAudioBlock{};
+bool audioBlockPending = false;
+
+void pollAndRouteSensorPacket() {
+  if (!acquisitionReady) {
+    return;
+  }
+
+  pet::data::ImuPacket packet{};
+  if (!acquisition.poll(packet)) {
+    return;
+  }
+  sdLogger.enqueue(packet);
+
+  if (!pet::config::kUsbBinaryStreamEnabled) {
+    return;
+  }
+  if (Serial && Serial.availableForWrite() >=
+                    static_cast<int>(sizeof(pet::data::ImuPacket))) {
+    Serial.write(reinterpret_cast<const uint8_t*>(&packet), sizeof(packet));
+  } else {
+    acquisition.recordUsbDrop();
+  }
+}
+
+void printHexByte(uint8_t value) {
+  if (value < 0x10) {
+    Serial.print('0');
+  }
+  Serial.print(value, HEX);
+}
+
+bool initializeSensor(pet::drivers::Icm20948& icm) {
+  Serial.print("ICM channel ");
+  Serial.print(icm.muxChannel());
+
+  if (!icm.begin()) {
+    Serial.println(" FAILED (tested 0x69 and 0x68; expected WHO_AM_I=0xEA)");
+    return false;
+  }
+
+  Serial.print(" OK address=0x");
+  printHexByte(icm.address());
+  Serial.print(" WHO_AM_I=0x");
+  printHexByte(icm.whoAmI());
+  Serial.print(" AK09916_WIA2=0x");
+  printHexByte(icm.magnetometerWhoAmI());
+  Serial.print(" accel=+/-");
+  Serial.print(pet::config::kIcmAccelRangeG);
+  Serial.print("g gyro=+/-");
+  Serial.print(pet::config::kIcmGyroRangeDps);
+  Serial.println("dps mag=20Hz");
+  return true;
+}
+
+void diagnoseMagnetometer(pet::drivers::Icm20948& icm) {
+  pet::drivers::Ak09916RawSample sample{};
+  Serial.print("AK09916 channel ");
+  Serial.print(icm.muxChannel());
+  Serial.print(" WIA2=0x");
+  printHexByte(icm.magnetometerWhoAmI());
+
+  if (!icm.readMagnetometerRaw(sample)) {
+    Serial.println(" raw_read=FAILED");
+    return;
+  }
+
+  Serial.print(" ST1=0x");
+  printHexByte(sample.status1);
+  Serial.print(" ST2=0x");
+  printHexByte(sample.status2);
+  Serial.print(" raw=");
+  Serial.print(sample.magnetic.x);
+  Serial.print(',');
+  Serial.print(sample.magnetic.y);
+  Serial.print(',');
+  Serial.print(sample.magnetic.z);
+  Serial.print(" data_ready=");
+  Serial.print(sample.dataReady ? "yes" : "no");
+  Serial.print(" overrun=");
+  Serial.print(sample.dataOverrun ? "yes" : "no");
+  Serial.print(" overflow=");
+  Serial.println(sample.overflow ? "yes" : "no");
+}
+
+bool initializeBmp(pet::drivers::Bmp390& bmp) {
+  Serial.print("BMP390 channel ");
+  Serial.print(bmp.muxChannel());
+
+  if (!bmp.begin()) {
+    Serial.println(" FAILED (tested 0x77 and 0x76; expected CHIP_ID=0x60)");
+    return false;
+  }
+
+  Serial.print(" OK address=0x");
+  printHexByte(bmp.address());
+  Serial.print(" CHIP_ID=0x");
+  printHexByte(bmp.chipId());
+  Serial.println();
+  return true;
+}
+
+}  // namespace
+
+void setup() {
+  Serial.begin(pet::config::kSerialBaud);
+
+  if (pet::config::kI2cScanDiagnosticEnabled) {
+    i2cScanDiagnostic.begin();
+    return;
+  }
+
+  if (pet::config::kPresentationStreamEnabled) {
+    Serial.println();
+    Serial.println("PBIC / Pet Analytics - live presentation stream");
+    Serial.print("Wire pins SDA=");
+    Serial.print(pet::pins::kI2cSda);
+    Serial.print(" SCL=");
+    Serial.print(pet::pins::kI2cScl);
+    Serial.print(" clock_hz=");
+    Serial.println(pet::config::kI2cClockHz);
+    Serial.println("SD disabled in presentation mode; no card required");
+    presentationStream.begin();
+    return;
+  }
+
+  if (pet::config::kAudioSdDiagnosticEnabled) {
+    Serial.println();
+    Serial.println("PBIC / Pet Analytics - isolated microphone SD test");
+    Serial.print("SD pins CS=");
+    Serial.print(pet::pins::kSdChipSelect);
+    Serial.print(" MOSI=");
+    Serial.print(pet::pins::kSdMosi);
+    Serial.print(" MISO=");
+    Serial.print(pet::pins::kSdMiso);
+    Serial.print(" SCK=");
+    Serial.println(pet::pins::kSdSck);
+    if (!audioSdDiagnostic.begin()) {
+      return;
+    }
+    if (!audioCapture.begin()) {
+      Serial.println("MIC_SD_TEST_ERROR reason=audio_capture_start");
+      return;
+    }
+    Serial.print("AUDIO_PREFLIGHT_START quiet_duration_ms=");
+    Serial.println(pet::config::kAudioPreflightDurationMs);
+    const pet::services::AudioPreflightResult preflight =
+        audioCapture.runQuietPreflight(
+            pet::config::kAudioPreflightDurationMs);
+    Serial.print("AUDIO_PREFLIGHT_RESULT valid=");
+    Serial.print(preflight.valid ? 1 : 0);
+    Serial.print(" accepted=");
+    Serial.print(preflight.accepted ? 1 : 0);
+    Serial.print(" samples=");
+    Serial.print(preflight.samples);
+    Serial.print(" mean_counts=");
+    Serial.print(preflight.meanCounts);
+    Serial.print(" rms_counts=");
+    Serial.print(preflight.rmsCounts);
+    Serial.print(" peak_counts=");
+    Serial.print(preflight.peakCounts);
+    Serial.print(" clipping_samples=");
+    Serial.println(preflight.clippingSamples);
+    if (!preflight.valid) {
+      Serial.println("MIC_SD_TEST_ERROR reason=no_valid_audio_blocks");
+      audioCapture.disable();
+      return;
+    }
+    if (!preflight.accepted) {
+      Serial.println(
+          "AUDIO_PREFLIGHT_WARNING reason=quiet_threshold_exceeded "
+          "recording_continues=1");
+    }
+
+    audioCapture.prepareForRecording();
+    const pet::services::AudioCaptureCounters captureAtStart =
+        audioCapture.counters();
+    const uint32_t timestampDeadlineMs = millis() + 50U;
+    while (audioCapture.firstSampleTimestampUs() == 0 &&
+           static_cast<int32_t>(millis() - timestampDeadlineMs) < 0) {
+      yield();
+    }
+    if (!audioSdDiagnostic.start(preflight,
+                                 audioCapture.firstSampleTimestampUs(),
+                                 captureAtStart)) {
+      audioCapture.disable();
+    }
+    return;
+  }
+
+  if (pet::config::kMicrophoneDiagnosticEnabled) {
+    Serial.println();
+    Serial.println("PBIC / Pet Analytics - ICS43434 RAM diagnostic");
+    microphoneDiagnostic.begin();
+    return;
+  }
+
+  Serial.println();
+  Serial.println("PBIC / Pet Analytics - synchronized ICM acquisition");
+  Serial.print("SD pins CS=");
+  Serial.print(pet::pins::kSdChipSelect);
+  Serial.print(" MOSI=");
+  Serial.print(pet::pins::kSdMosi);
+  Serial.print(" MISO=");
+  Serial.print(pet::pins::kSdMiso);
+  Serial.print(" SCK=");
+  Serial.println(pet::pins::kSdSck);
+  const bool sdCardReady = sdLogger.beginCard();
+  Serial.println(sdCardReady
+                     ? "SD read/write diagnostic OK"
+                     : "SD unavailable; recording disabled until reboot");
+
+  Serial.print("Wire pins SDA=");
+  Serial.print(pet::pins::kI2cSda);
+  Serial.print(" SCL=");
+  Serial.print(pet::pins::kI2cScl);
+  Serial.print(" clock_hz=");
+  Serial.println(pet::config::kI2cClockHz);
+
+  Wire.begin();
+  Wire.setClock(pet::config::kI2cClockHz);
+
+  if (!mux.begin()) {
+    Serial.println("PCA9548A FAILED at address 0x70");
+    return;
+  }
+  Serial.println("PCA9548A OK at address 0x70");
+
+  pet::services::SdSessionMetadata sessionMetadata{};
+  bool sensorsReady = true;
+  for (size_t i = 0; i < pet::data::kIcmCount; ++i) {
+    sessionMetadata.icmReady[i] = initializeSensor(*icms[i]);
+    sensorsReady = sessionMetadata.icmReady[i] && sensorsReady;
+  }
+  if (sensorsReady) {
+    delay(60);
+    for (pet::drivers::Icm20948* icm : icms) {
+      diagnoseMagnetometer(*icm);
+    }
+  }
+  bool bmpsReady = true;
+  for (size_t i = 0; i < pet::data::kBmpCount; ++i) {
+    sessionMetadata.bmpReady[i] = initializeBmp(*bmps[i]);
+    sessionMetadata.bmpAddress[i] = bmps[i]->address();
+    bmpsReady = sessionMetadata.bmpReady[i] && bmpsReady;
+  }
+  if (bmpsReady) {
+    bool rawSamplingReady = true;
+    for (pet::drivers::Bmp390* bmp : bmps) {
+      rawSamplingReady = bmp->startRawSampling25Hz() && rawSamplingReady;
+    }
+    if (!rawSamplingReady) {
+      Serial.println("BMP raw sampling configuration FAILED");
+      bmpsReady = false;
+    } else {
+      Serial.println("BMP raw sampling OK rate_hz=25 cached_in_100hz_packets");
+    }
+    for (size_t i = 0; i < pet::data::kBmpCount; ++i) {
+      sessionMetadata.bmpNvmValid[i] =
+          bmps[i]->readNvm(sessionMetadata.bmpNvm[i]);
+      Serial.print("BMP390 channel ");
+      Serial.print(bmps[i]->muxChannel());
+      Serial.println(sessionMetadata.bmpNvmValid[i]
+                         ? " NVM calibration read OK (21 bytes)"
+                         : " NVM calibration read FAILED");
+    }
+  }
+  mux.disableAllChannels();
+
+  const bool audioRequested = pet::config::kMicrophoneRecordingEnabled &&
+                              sdCardReady && sensorsReady && bmpsReady;
+  sessionMetadata.audioEnabled = audioRequested;
+  bool sdSessionReady = false;
+  if (sdCardReady) {
+    sdSessionReady = sdLogger.beginSession(
+        sessionMetadata, acquisition.counters(), audioCapture.counters());
+    if (!sdSessionReady) {
+      Serial.println(
+          "SD session creation FAILED; recording disabled until reboot");
+    }
+  }
+
+  if (audioRequested && sdSessionReady) {
+    const bool audioStarted = audioCapture.begin();
+    if (audioStarted) {
+      Serial.print("AUDIO_PREFLIGHT_START quiet_duration_ms=");
+      Serial.println(pet::config::kAudioPreflightDurationMs);
+      sessionMetadata.audioPreflight = audioCapture.runQuietPreflight(
+          pet::config::kAudioPreflightDurationMs);
+      const pet::services::AudioPreflightResult& preflight =
+          sessionMetadata.audioPreflight;
+      Serial.print("AUDIO_PREFLIGHT_RESULT valid=");
+      Serial.print(preflight.valid ? 1 : 0);
+      Serial.print(" accepted=");
+      Serial.print(preflight.accepted ? 1 : 0);
+      Serial.print(" samples=");
+      Serial.print(preflight.samples);
+      Serial.print(" mean_counts=");
+      Serial.print(preflight.meanCounts);
+      Serial.print(" rms_counts=");
+      Serial.print(preflight.rmsCounts);
+      Serial.print(" peak_counts=");
+      Serial.print(preflight.peakCounts);
+      Serial.print(" clipping_samples=");
+      Serial.println(preflight.clippingSamples);
+    }
+    sessionMetadata.audioEnabled =
+        audioStarted && sessionMetadata.audioPreflight.valid;
+    if (sessionMetadata.audioEnabled) {
+      audioCapture.prepareForRecording();
+    }
+    const uint32_t timestampDeadlineMs = millis() + 50U;
+    while (sessionMetadata.audioEnabled &&
+           audioCapture.firstSampleTimestampUs() == 0 &&
+           static_cast<int32_t>(millis() - timestampDeadlineMs) < 0) {
+      yield();
+    }
+    sessionMetadata.audioStartTimestampUs =
+        audioCapture.firstSampleTimestampUs();
+    sessionMetadata.audioStartTimestampValid =
+        sessionMetadata.audioStartTimestampUs != 0;
+    if (sessionMetadata.audioEnabled) {
+      if (!sessionMetadata.audioPreflight.accepted) {
+        Serial.println(
+            "AUDIO_PREFLIGHT_WARNING reason=quiet_threshold_exceeded "
+            "recording_continues=1");
+      }
+      Serial.print("AUDIO_CAPTURE_START format=pcm_s16le sample_rate_hz=");
+      Serial.print(pet::config::kMicrophoneSampleRateHz);
+      Serial.print(" channels=1 block_samples=");
+      Serial.print(pet::config::kMicrophoneBlockSamples);
+      Serial.print(" first_sample_timestamp_us=");
+      Serial.println(sessionMetadata.audioStartTimestampUs);
+    } else {
+      Serial.println(
+          "AUDIO_CAPTURE_REJECTED reason=no_valid_preflight_samples "
+          "check_i2s_wiring_power_and_microphone reboot_required=1");
+      audioCapture.disable();
+    }
+  }
+
+  if (sdSessionReady) {
+    sdSessionReady = sdLogger.finalizeInitialSessionSetup(
+        sessionMetadata, acquisition.counters(), audioCapture.counters());
+    if (sdSessionReady) {
+      Serial.print("SD_SESSION_START folder=");
+      Serial.print(sdLogger.sessionFolder());
+      Serial.print(" buffer_bytes=");
+      Serial.print(pet::config::kSdRamBufferBytes);
+      Serial.print(" imu_block_bytes=");
+      Serial.print(pet::config::kSdImuWriteBlockBytes);
+      Serial.print(" spi_clock_mhz=");
+      Serial.print(pet::config::kSdSpiClockMHz);
+      Serial.print(" flush_packets=");
+      Serial.print(pet::config::kSdPacketsPerFlush);
+      Serial.print(" continuous=1 preallocation_seconds=");
+      Serial.print(pet::config::kSdPreallocationSeconds);
+      Serial.print(" journal_packets=");
+      Serial.println(pet::config::kSdPacketsPerJournalUpdate);
+    } else {
+      Serial.println(
+          "SD session finalization FAILED; recording disabled until reboot");
+    }
+  }
+
+  if (!sensorsReady || !bmpsReady) {
+    Serial.println("Acquisition disabled because at least one sensor failed.");
+    return;
+  }
+
+  Serial.print(pet::config::kUsbBinaryStreamEnabled
+                   ? "BINARY_STREAM_START packet_size="
+                   : "USB_BINARY_STREAM_DISABLED packet_size=");
+  Serial.print(sizeof(pet::data::ImuPacket));
+  Serial.print(" packet_version=");
+  Serial.print(pet::config::kImuPacketVersion);
+  Serial.print(" sample_rate_hz=");
+  Serial.print(pet::config::kImuSampleRateHz);
+  Serial.print(" bmp_rate_hz=");
+  Serial.print(pet::config::kBmpSampleRateHz);
+  Serial.print(" mag_rate_hz=");
+  Serial.print(pet::config::kMagSampleRateHz);
+  Serial.print(" mag_poll_rate_hz=");
+  Serial.println(pet::config::kMagPollRateHz);
+
+  acquisition.start(micros());
+  acquisitionReady = true;
+}
+
+void loop() {
+  if (pet::config::kI2cScanDiagnosticEnabled) {
+    i2cScanDiagnostic.poll();
+    return;
+  }
+
+  if (pet::config::kPresentationStreamEnabled) {
+    presentationStream.service();
+    return;
+  }
+
+  if (pet::config::kAudioSdDiagnosticEnabled) {
+    while (audioSdDiagnostic.canEnqueueAudioBlock()) {
+      if (!audioBlockPending) {
+        if (!audioCapture.pop(pendingAudioBlock)) {
+          break;
+        }
+        audioBlockPending = true;
+      }
+      if (!audioSdDiagnostic.enqueueAudio(pendingAudioBlock)) {
+        break;
+      }
+      audioBlockPending = false;
+    }
+    audioSdDiagnostic.service(audioCapture.counters());
+    if (!audioSdDiagnostic.recording() && audioCapture.started()) {
+      audioCapture.disable();
+    }
+    return;
+  }
+
+  if (pet::config::kMicrophoneDiagnosticEnabled) {
+    microphoneDiagnostic.poll();
+    return;
+  }
+
+  sdLogger.updateFailureIndicator();
+
+  if (!acquisitionReady) {
+    return;
+  }
+
+  pollAndRouteSensorPacket();
+  sdLogger.service(acquisition.counters(), audioCapture.counters());
+  if (!sdLogger.sessionActive() && audioCapture.started()) {
+    audioCapture.disable();
+    audioBlockPending = false;
+  }
+}

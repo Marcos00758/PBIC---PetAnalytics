@@ -1,0 +1,1233 @@
+diff --git a/README.md b/README.md
+index 14626a3..4f51e8e 100644
+--- a/README.md
++++ b/README.md
+@@ -117,6 +117,13 @@ Para estimar uma calibracao magnetica inicial depois de uma rotacao 3D ampla:
+ python python/calibrate_magnetometer.py data/rotacao_3d.bin
+ ```
+ 
++Com o firmware em modo de apresentacao, a rotacao pode ser gravada ao vivo em um
++unico comando, sem arquivo intermediario:
++
++```powershell
++python python/calibrate_magnetometer.py --live
++```
++
+ ## Diagnostico do microfone
+ 
+ ### Teste isolado microfone + SD
+@@ -266,6 +273,7 @@ dispositivo produz um valor positivo em centimetros.
+ | `B` | liga e desliga a media movel do barometro |
+ | `F` | liga e desliga a suavizacao dos IMU |
+ | `D` | mostra ou oculta as amostras repetidas do cache |
++| `Z` | re-zera a altitude no ponto atual, sem exigir repouso |
+ | `R` | refaz a calibracao inicial |
+ | setas | aumenta ou reduz a janela deslizante |
+ | `Q` | sai |
+@@ -274,8 +282,8 @@ dispositivo produz um valor positivo em centimetros.
+ 
+ Nenhuma suavizacao acontece sem estar declarada. O rodape mostra o estado de
+ cada filtro e as teclas acima alternam cada um. Os padroes estao no inicio de
+-`python/presentation_panel.py`: `PRESSURE_FILTER_ENABLED` ligado,
+-`IMU_FILTER_ENABLED` desligado e `DECIMATION_ENABLED` ligado.
++`python/presentation_panel.py`: `PRESSURE_FILTER_ENABLED`,
++`IMU_FILTER_ENABLED` e `DECIMATION_ENABLED`, todos ligados.
+ 
+ A pressao e mostrada como desvio da referencia de calibracao, em pascal, e nao
+ como valor absoluto: os dois barometros ficam separados por cerca de dez pascal
+@@ -301,3 +309,28 @@ dispositivo em movimento, gravidade e giroscopio parado nao sao criterios
+ validos. Os testes de sensor travado, atualizacao do magnetometro, saturacao e
+ saude do fluxo continuam ativos. Para o veredito completo em repouso, use
+ `python/presentation_monitor.py`.
++
++## Calibracao magnetica dos tres ICM
++
++Cada AK09916 tem metal diferente por perto, bateria, cartao e fios, e esse metal
++soma um deslocamento constante a leitura. Sem corrigir, os tres sensores medem
++intensidades diferentes no mesmo lugar. Medido em bancada: 28,6 uT no ICM0,
++5,9 uT no ICM1 e 56,8 uT no ICM2, quando o campo terrestre no sudeste do Brasil
++e de cerca de 23 uT. E o que faz `magnetic_norm_out_of_range` aparecer.
++
++Com o modo de apresentacao gravado, rode e gire o conjunto devagar em todas as
++direcoes, cobrindo os tres eixos, como se desenhasse uma esfera no ar:
++
++```powershell
++python python/calibrate_magnetometer.py --live
++python python/presentation_panel.py --mag-calibration data/mag_calibration.json
++```
++
++O programa imprime o progresso a cada cinco segundos, mostrando o menor eixo ja
++coberto e a meta. Enquanto o menor eixo estiver abaixo da meta, continue
++girando; ao final ele recusa a captura em vez de gerar uma calibracao ruim.
++
++O JSON registra em que canal do multiplexador cada sensor foi medido, e o painel
++recusa um arquivo cujo canal nao bata com o firmware em execucao. O mapeamento
++ja mudou uma vez neste projeto, e sem essa verificacao um arquivo antigo
++corrigiria cada sensor com o ferro de outro, silenciosamente.
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 536bb17..4005365 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -580,3 +580,49 @@ constante em vez da variacao que interessa.
+ Cada painel tem um piso de escala vertical, aplicado por `setLimits(minYRange)`.
+ Sem ele a autoescala de um sensor parado amplia o proprio ruido ate encher o
+ painel, o que fazia um repouso normal parecer defeito.
++
++## Escala, gravidade e altitude no painel
++
++Tres correcoes vieram de olhar o painel rodando com o hardware real.
++
++A escala vertical de cada painel e controlada por `AxisScaler` e nao mais pela
++autoescala do pyqtgraph. Ela cresce imediatamente, para nunca cortar um pico, e
++encolhe devagar. A autoescala simetrica fazia um unico pico esticar o eixo e
++comprimir todo o resto, e o eixo ficava respirando a cada movimento.
++
++A gravidade deixou de ser um vetor fixo capturado na calibracao. Um vetor fixo
++so vale enquanto a orientacao nao muda, e numa apresentacao os sensores sao
++levantados e girados o tempo todo; qualquer reposicionamento deixava um degrau
++permanente no tracado. Agora um estimador exponencial de constante de tempo
++longa acompanha a gravidade, entao reorientar o sensor volta a zero sozinho em
++poucos segundos e o movimento rapido continua visivel. O estimador e atualizado
++mesmo quando a gravidade esta sendo exibida, para que alternar a tecla nao
++produza degrau.
++
++A referencia de pressao passou a ser a mediana da janela de calibracao, nao a
++media. O filtro IIR do BMP390 converge ao longo de aproximadamente um segundo
++apos a configuracao, e uma referencia capturada no meio dessa subida fica errada
++pela sessao inteira: observou-se um erro de cerca de dois hectopascal em um dos
++barometros, equivalente a dezoito metros de altitude, que consumia o eixo
++inteiro do grafico. A mediana ignora a rampa inicial. Alem disso a calibracao
++mede a deriva dentro da propria janela e compara as duas referencias entre si,
++avisando no rodape quando algo nao fecha, e a tecla `Z` re-zera a altitude no
++ponto atual sem exigir repouso.
++
++## Calibracao magnetica ao vivo
++
++`python/calibrate_magnetometer.py` ganhou `--live`, que grava a rotacao direto do
++modo de apresentacao em vez de exigir um arquivo capturado antes. Reaproveita
++`StreamDecoder`, `SerialSource` e `wait_for_banner` de
++`python/presentation_monitor.py`, entao existe uma unica implementacao da leitura
++do fluxo. A janela e medida pelo relogio do sensor, como nas demais ferramentas.
++
++O documento gerado registra o canal do multiplexador de cada sensor, e
++`load_magnetometer_calibrations` recusa um arquivo cujo canal nao corresponda ao
++firmware em execucao. Essa verificacao existe por causa de um caso concreto: o
++mapeamento mudou de 0, 1 e 4 para 4, 5 e 6, e o arquivo antigo em `data/`
++aplicaria a correcao de cada sensor no sensor errado sem nenhum aviso.
++
++`wait_for_banner` passou a devolver, quando solicitado, os pacotes que chegaram
++junto com o banner. A verificacao textual podia descarta-los sem consequencia,
++mas uma captura de calibracao perderia sua abertura.
+diff --git a/python/calibrate_magnetometer.py b/python/calibrate_magnetometer.py
+index ccae59e..eb2dead 100644
+--- a/python/calibrate_magnetometer.py
++++ b/python/calibrate_magnetometer.py
+@@ -6,9 +6,18 @@ import argparse
+ import json
+ from pathlib import Path
+ 
+-from parse_data import MAG_UT_PER_COUNT, ParseStats, iter_file_packets
++from parse_data import (
++    MAG_UT_PER_COUNT,
++    ImuPacket,
++    ParseStats,
++    elapsed_us,
++    iter_file_packets,
++    load_session_metadata,
++)
+ 
+ DEFAULT_MINIMUM_AXIS_SPAN_UT = 20.0
++DEFAULT_LIVE_DURATION_SECONDS = 60.0
++SENSOR_COUNT = 3
+ 
+ 
+ def estimate_calibration(
+@@ -41,44 +50,204 @@ def estimate_calibration(
+     return hard_iron_ut, soft_iron_matrix
+ 
+ 
+-def calibrate_file(path: Path, minimum_axis_span_ut: float) -> dict[str, object]:
+-    stats = ParseStats()
+-    minimum = [[32767, 32767, 32767] for _ in range(3)]
+-    maximum = [[-32768, -32768, -32768] for _ in range(3)]
++class AxisExtremes:
++    """Running minimum and maximum of the nine raw magnetic axes."""
+ 
+-    for parsed in iter_file_packets(path, stats):
+-        for sensor in range(3):
++    def __init__(self) -> None:
++        self.minimum = [[32767, 32767, 32767] for _ in range(SENSOR_COUNT)]
++        self.maximum = [[-32768, -32768, -32768] for _ in range(SENSOR_COUNT)]
++        self.packets = 0
++
++    def add(self, packet: ImuPacket) -> None:
++        for sensor in range(SENSOR_COUNT):
+             base = sensor * 9 + 6
+-            for axis, value in enumerate(parsed.packet.values[base : base + 3]):
+-                minimum[sensor][axis] = min(minimum[sensor][axis], value)
+-                maximum[sensor][axis] = max(maximum[sensor][axis], value)
++            for axis, value in enumerate(packet.values[base : base + 3]):
++                if value < self.minimum[sensor][axis]:
++                    self.minimum[sensor][axis] = value
++                if value > self.maximum[sensor][axis]:
++                    self.maximum[sensor][axis] = value
++        self.packets += 1
++
++    def coverage_ut(self) -> tuple[tuple[float, ...], ...]:
++        """Span reached on every axis, the progress a rotation has to fill."""
++        return tuple(
++            tuple(
++                (self.maximum[sensor][axis] - self.minimum[sensor][axis])
++                * MAG_UT_PER_COUNT
++                for axis in range(3)
++            )
++            for sensor in range(SENSOR_COUNT)
++        )
+ 
+-    if stats.valid_packets == 0:
++
++def build_document(
++    extremes: AxisExtremes,
++    minimum_axis_span_ut: float,
++    source: dict[str, object],
++    channels: dict[int, str] | None = None,
++) -> dict[str, object]:
++    if extremes.packets == 0:
+         raise ValueError("capture contains no valid packets")
+ 
+-    document: dict[str, object] = {
+-        "source_file": str(path),
+-        "packet_count": stats.valid_packets,
+-        "method": "axis_minmax_diagonal_soft_iron",
+-    }
+-    for sensor in range(3):
+-        minimum_tuple = tuple(minimum[sensor])
+-        maximum_tuple = tuple(maximum[sensor])
++    document: dict[str, object] = dict(source)
++    document["packet_count"] = extremes.packets
++    document["method"] = "axis_minmax_diagonal_soft_iron"
++
++    for sensor in range(SENSOR_COUNT):
++        minimum_tuple = tuple(extremes.minimum[sensor])
++        maximum_tuple = tuple(extremes.maximum[sensor])
+         hard_iron, matrix = estimate_calibration(
+             minimum_tuple, maximum_tuple, minimum_axis_span_ut
+         )
+-        document[f"icm{sensor}"] = {
++        entry: dict[str, object] = {
+             "hard_iron_ut": hard_iron,
+             "soft_iron_matrix": matrix,
+             "raw_min": minimum_tuple,
+             "raw_max": maximum_tuple,
+         }
++        # The multiplexer channel is recorded so a calibration can never be
++        # applied to a sensor it was not measured on. The channel assignment has
++        # changed once already, which silently mismatched an older file.
++        if channels and sensor in channels:
++            entry["mux_channel"] = channels[sensor]
++        document[f"icm{sensor}"] = entry
+     return document
+ 
+ 
++def session_channels(path: Path) -> dict[int, str]:
++    metadata = load_session_metadata(path)
++    channels: dict[int, str] = {}
++    for sensor in range(SENSOR_COUNT):
++        value = metadata.get(f"icm{sensor}_channel")
++        if value is not None:
++            channels[sensor] = value
++    return channels
++
++
++def calibrate_live(
++    port_name: str | None,
++    duration_seconds: float,
++    minimum_axis_span_ut: float,
++) -> dict[str, object]:
++    """Collect a rotation straight from the presentation stream."""
++    import time
++
++    import serial
++
++    from capture_serial import READ_TIMEOUT_SECONDS, SERIAL_BAUD, detect_port
++    from presentation_monitor import (
++        BANNER_TIMEOUT_SECONDS,
++        SerialSource,
++        StreamDecoder,
++        wait_for_banner,
++    )
++
++    decoder = StreamDecoder()
++    extremes = AxisExtremes()
++    resolved = port_name or detect_port()
++    print(f"port={resolved}")
++
++    with serial.Serial(resolved, SERIAL_BAUD, timeout=READ_TIMEOUT_SECONDS) as port:
++        port.dtr = True
++        port.rts = True
++        time.sleep(0.2)
++        port.reset_input_buffer()
++        source = SerialSource(port)
++        opening: list[ImuPacket] = []
++        if not wait_for_banner(source, decoder, BANNER_TIMEOUT_SECONDS, opening):
++            raise TimeoutError(
++                "no firmware banner received; confirm that "
++                "kPresentationStreamEnabled is true in src/config/constants.h"
++            )
++        if not decoder.device.streaming:
++            raise RuntimeError(
++                "the firmware reported streaming=0; run "
++                "python/presentation_monitor.py for the sensor report"
++            )
++
++        print(f"rotate_slowly_in_every_direction duration_s={duration_seconds:g}")
++        duration_us = round(duration_seconds * 1_000_000)
++        elapsed = 0
++        previous: int | None = None
++        reported = -1.0
++        deadline = time.monotonic() + duration_seconds * 3 + 30.0
++
++        for packet in opening:
++            if previous is not None:
++                elapsed += elapsed_us(previous, packet.timestamp_us)
++            previous = packet.timestamp_us
++            extremes.add(packet)
++
++        while elapsed < duration_us:
++            if time.monotonic() > deadline:
++                raise TimeoutError(
++                    "the sensor stream did not reach the requested duration; "
++                    f"received_packets={extremes.packets}"
++                )
++            for packet in decoder.feed(source.read()):
++                if previous is not None:
++                    elapsed += elapsed_us(previous, packet.timestamp_us)
++                previous = packet.timestamp_us
++                extremes.add(packet)
++            seconds = elapsed / 1_000_000
++            if seconds - reported >= 5.0:
++                reported = seconds
++                worst = min(min(axes) for axes in extremes.coverage_ut())
++                print(
++                    f"elapsed_s={seconds:0.0f} "
++                    f"smallest_axis_span_ut={worst:0.1f} "
++                    f"target_ut={minimum_axis_span_ut:g}"
++                )
++
++    channels = {
++        sensor: values["channel"]
++        for sensor, values in decoder.device.icms.items()
++        if "channel" in values
++    }
++    source_info: dict[str, object] = {
++        "source": "live_presentation_stream",
++        "port": resolved,
++        "firmware_version": decoder.device.header.get("firmware_version", "unknown"),
++        "requested_duration_s": duration_seconds,
++    }
++    return build_document(extremes, minimum_axis_span_ut, source_info, channels)
++
++
++def calibrate_file(path: Path, minimum_axis_span_ut: float) -> dict[str, object]:
++    stats = ParseStats()
++    extremes = AxisExtremes()
++    for parsed in iter_file_packets(path, stats):
++        extremes.add(parsed.packet)
++    return build_document(
++        extremes,
++        minimum_axis_span_ut,
++        {"source": "file", "source_file": str(path)},
++        session_channels(path),
++    )
++
++
+ def main() -> None:
+     parser = argparse.ArgumentParser(description=__doc__)
+-    parser.add_argument("input", type=Path, help="capture made during slow 3D rotation")
++    parser.add_argument(
++        "input",
++        type=Path,
++        nargs="?",
++        help="capture made during slow 3D rotation; omit when using --live",
++    )
++    parser.add_argument(
++        "--live",
++        action="store_true",
++        help="record the rotation directly from the presentation stream",
++    )
++    parser.add_argument(
++        "--port", help="serial port for --live; auto-detected if omitted"
++    )
++    parser.add_argument(
++        "--duration",
++        type=float,
++        default=DEFAULT_LIVE_DURATION_SECONDS,
++        help="sensor-time rotation window for --live (default: 60)",
++    )
+     parser.add_argument("--output", type=Path, help="calibration JSON output path")
+     parser.add_argument(
+         "--minimum-axis-span-ut",
+@@ -89,16 +258,35 @@ def main() -> None:
+     args = parser.parse_args()
+     if args.minimum_axis_span_ut <= 0:
+         parser.error("--minimum-axis-span-ut must be positive")
++    if args.live == (args.input is not None):
++        parser.error("give either a capture file or --live, not both")
++    if args.live and (args.duration <= 0 or args.duration > 600):
++        parser.error("--duration must be greater than 0 and at most 600 seconds")
++
++    if args.live:
++        output = args.output or Path("data") / "mag_calibration.json"
++    else:
++        output = args.output or args.input.with_name(
++            f"{args.input.stem}_mag_calibration.json"
++        )
+ 
+-    output = args.output or args.input.with_name(
+-        f"{args.input.stem}_mag_calibration.json"
+-    )
+     try:
+-        document = calibrate_file(args.input, args.minimum_axis_span_ut)
++        if args.live:
++            document = calibrate_live(
++                args.port, args.duration, args.minimum_axis_span_ut
++            )
++        else:
++            document = calibrate_file(args.input, args.minimum_axis_span_ut)
+         output.parent.mkdir(parents=True, exist_ok=True)
+         output.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+-    except (OSError, ValueError) as exc:
++    except (OSError, RuntimeError, TimeoutError, ValueError) as exc:
+         raise SystemExit(str(exc)) from exc
++
++    for sensor in range(SENSOR_COUNT):
++        entry = document[f"icm{sensor}"]
++        offsets = ", ".join(f"{value:+0.1f}" for value in entry["hard_iron_ut"])
++        channel = entry.get("mux_channel", "?")
++        print(f"icm{sensor} channel={channel} hard_iron_ut={offsets}")
+     print(f"calibration_file={output.resolve()}")
+ 
+ 
+diff --git a/python/presentation_monitor.py b/python/presentation_monitor.py
+index 18feba4..90c9cbd 100644
+--- a/python/presentation_monitor.py
++++ b/python/presentation_monitor.py
+@@ -594,11 +594,22 @@ class SerialSource:
+ 
+ 
+ def wait_for_banner(
+-    source: SerialSource, decoder: StreamDecoder, timeout_s: float
++    source: SerialSource,
++    decoder: StreamDecoder,
++    timeout_s: float,
++    collected: list[ImuPacket] | None = None,
+ ) -> bool:
++    """Read until the firmware identifies itself.
++
++    Packets already arriving alongside the banner are handed back through
++    `collected` when a caller asks for them; discarding them silently would
++    lose the opening of a capture.
++    """
+     deadline = time.monotonic() + timeout_s
+     while time.monotonic() < deadline:
+-        decoder.feed(source.read())
++        packets = decoder.feed(source.read())
++        if collected is not None:
++            collected.extend(packets)
+         if decoder.device.ready:
+             return True
+     return False
+diff --git a/python/presentation_panel.py b/python/presentation_panel.py
+index 34bf70b..43cfac3 100644
+--- a/python/presentation_panel.py
++++ b/python/presentation_panel.py
+@@ -4,6 +4,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import math
++import statistics
+ import sys
+ import time
+ from dataclasses import dataclass
+@@ -48,13 +49,27 @@ BARO_COLUMNS = 8
+ # Every filter is a switch. Nothing smooths the data unless one of these is on,
+ # and the footer always states which are active.
+ PRESSURE_FILTER_ENABLED = True
+-IMU_FILTER_ENABLED = False
++IMU_FILTER_ENABLED = True
+ DECIMATION_ENABLED = True
+ 
+ DEFAULT_PRESSURE_FILTER_SECONDS = 1.0
+ DEFAULT_IMU_FILTER_SECONDS = 0.05
+ PASCAL_PER_HECTOPASCAL = 100.0
+ 
++# The BMP390 IIR filter converges over roughly a second after configuration.
++# A reference captured mid-ramp is wrong for the whole session, so the datum is
++# a median and the drift across the window is reported.
++PRESSURE_DRIFT_LIMIT_HPA = 0.20
++PRESSURE_AGREEMENT_LIMIT_HPA = 0.50
++
++# Gravity is tracked instead of frozen. A vector captured once only holds while
++# the orientation never changes, and a presentation means picking sensors up.
++GRAVITY_TRACKING_SECONDS = 3.0
++
++# The axis grows at once and shrinks slowly, so one spike cannot make it breathe.
++SCALE_SHRINK_RATE = 0.03
++SCALE_PADDING = 1.1
++
+ # Smallest span each plot may zoom into. Without a floor the autorange fills the
+ # panel with the noise of a sensor that is simply sitting still.
+ MINIMUM_SPAN_ACCEL_MPS2 = 2.0
+@@ -133,11 +148,27 @@ class RestCalibration:
+     gravity_mps2: tuple[tuple[float, float, float], ...]
+     gravity_norm_mps2: tuple[float, ...]
+     reference_pressure_hpa: tuple[float | None, ...]
++    pressure_drift_hpa: tuple[float, ...] = (0.0, 0.0)
+ 
+     @property
+     def valid(self) -> bool:
+         return self.samples > 0
+ 
++    @property
++    def pressure_settled(self) -> bool:
++        """False when a barometer was still converging during calibration."""
++        return all(
++            drift <= PRESSURE_DRIFT_LIMIT_HPA for drift in self.pressure_drift_hpa
++        )
++
++    @property
++    def barometers_agree(self) -> bool:
++        """The two sit on one board, so their datums must be close."""
++        usable = [value for value in self.reference_pressure_hpa if value is not None]
++        if len(usable) < 2:
++            return True
++        return max(usable) - min(usable) <= PRESSURE_AGREEMENT_LIMIT_HPA
++
+ 
+ def relative_altitude_cm(pressure_hpa: float, reference_hpa: float | None) -> float:
+     """Height above the calibration point, positive when the device rises."""
+@@ -193,13 +224,30 @@ def calibrate_at_rest(
+         gravity_norm.append(math.sqrt(sum(value * value for value in accel_mean)))
+ 
+     reference: list[float | None] = []
++    drift: list[float] = []
+     for index in range(BMP_COUNT):
+         readings = [
+             compensated_pressure_hpa(packet, index, bmp_calibrations[index])[0]
+             for packet in packets
+         ]
+         usable = [value for value in readings if not math.isnan(value)]
+-        reference.append(sum(usable) / len(usable) if usable else None)
++        if not usable:
++            reference.append(None)
++            drift.append(0.0)
++            continue
++        # The median ignores a ramp at the start of the window; the mean would
++        # be dragged down by it and poison the datum for the whole session.
++        reference.append(statistics.median(usable))
++        middle = len(usable) // 2
++        if middle:
++            drift.append(
++                abs(
++                    statistics.fmean(usable[middle:])
++                    - statistics.fmean(usable[:middle])
++                )
++            )
++        else:
++            drift.append(0.0)
+ 
+     return RestCalibration(
+         samples=len(packets),
+@@ -207,9 +255,47 @@ def calibrate_at_rest(
+         gravity_mps2=tuple(gravity),
+         gravity_norm_mps2=tuple(gravity_norm),
+         reference_pressure_hpa=tuple(reference),
++        pressure_drift_hpa=tuple(drift),
+     )
+ 
+ 
++class AxisScaler:
++    """Vertical range that grows at once and shrinks slowly."""
++
++    def __init__(
++        self, minimum_span: float, shrink_rate: float = SCALE_SHRINK_RATE
++    ) -> None:
++        self.minimum_span = minimum_span
++        self.shrink_rate = shrink_rate
++        self.low: float | None = None
++        self.high: float | None = None
++
++    def update(self, data_low: float, data_high: float) -> tuple[float, float]:
++        centre = (data_low + data_high) / 2.0
++        span = max(data_high - data_low, self.minimum_span) * SCALE_PADDING
++        target_low = centre - span / 2.0
++        target_high = centre + span / 2.0
++
++        if self.low is None or self.high is None:
++            self.low, self.high = target_low, target_high
++            return self.low, self.high
++
++        # A wider target takes effect immediately so nothing is ever clipped.
++        # A narrower one is approached gradually, which is what stops a single
++        # spike from making the whole axis breathe in and out.
++        self.low = (
++            target_low
++            if target_low < self.low
++            else self.low + (target_low - self.low) * self.shrink_rate
++        )
++        self.high = (
++            target_high
++            if target_high > self.high
++            else self.high + (target_high - self.high) * self.shrink_rate
++        )
++        return self.low, self.high
++
++
+ class PacketConverter:
+     """Turns raw packets into the physical rows the plots consume."""
+ 
+@@ -226,6 +312,17 @@ class PacketConverter:
+         self.bmp_calibrations = bmp_calibrations
+         self.calibration = calibration
+         self.remove_gravity = remove_gravity
++        self._gravity: list[list[float]] | None = None
++        self._gravity_alpha = 1.0 - math.exp(
++            -1.0 / max(1.0, device.imu_rate_hz * GRAVITY_TRACKING_SECONDS)
++        )
++
++    def reset_gravity_tracking(self) -> None:
++        """Seed the tracker from the calibration so it starts converged."""
++        if self.calibration is not None and self.calibration.valid:
++            self._gravity = [list(vector) for vector in self.calibration.gravity_mps2]
++        else:
++            self._gravity = None
+ 
+     def imu_row(self, packet: ImuPacket) -> list[float]:
+         accel_scale = self.device.accel_scale_mps2
+@@ -235,9 +332,22 @@ class PacketConverter:
+             base = sensor * 9
+             for axis in range(3):
+                 value = packet.values[base + axis] * accel_scale
+-                if self.remove_gravity and self.calibration is not None:
+-                    value -= self.calibration.gravity_mps2[sensor][axis]
+-                row.append(value)
++                # The estimate follows the sensor even while it is displayed
++                # raw, so toggling the key never produces a step.
++                if self._gravity is None:
++                    self._gravity = [
++                        [0.0, 0.0, 0.0] for _ in range(SENSOR_COUNT)
++                    ]
++                    if self.calibration is not None and self.calibration.valid:
++                        self._gravity = [
++                            list(vector) for vector in self.calibration.gravity_mps2
++                        ]
++                    else:
++                        self._gravity[sensor][axis] = value
++                estimate = self._gravity[sensor][axis]
++                estimate += self._gravity_alpha * (value - estimate)
++                self._gravity[sensor][axis] = estimate
++                row.append(value - estimate if self.remove_gravity else value)
+             for axis in range(3):
+                 value = packet.values[base + 3 + axis] * gyro_scale
+                 if self.calibration is not None:
+@@ -333,9 +443,15 @@ class SampleBuffer:
+ 
+ 
+ def load_magnetometer_calibrations(
+-    path: Path | None,
++    path: Path | None, device: DeviceInfo | None = None
+ ) -> tuple[MagnetometerCalibration, ...]:
+-    """Read the JSON produced by calibrate_magnetometer.py."""
++    """Read the JSON produced by calibrate_magnetometer.py.
++
++    When the file records the multiplexer channel it was measured on, that
++    channel must still match the running firmware. The assignment has changed
++    once already, and applying an old file would silently correct each sensor
++    with another sensor's iron.
++    """
+     if path is None:
+         return (MagnetometerCalibration(),) * SENSOR_COUNT
+ 
+@@ -345,6 +461,16 @@ def load_magnetometer_calibrations(
+     calibrations = []
+     for sensor in range(SENSOR_COUNT):
+         entry = document.get(f"icm{sensor}", {})
++        recorded = entry.get("mux_channel")
++        if device is not None and recorded is not None:
++            current = device.icms.get(sensor, {}).get("channel")
++            if current is not None and str(recorded) != str(current):
++                raise ValueError(
++                    f"magnetometer calibration for icm{sensor} was measured on "
++                    f"channel {recorded} but the firmware reports channel "
++                    f"{current}; record a new rotation with "
++                    "python/calibrate_magnetometer.py --live"
++                )
+         hard_iron = tuple(
+             float(value) for value in entry.get("hard_iron_ut", (0, 0, 0))
+         )
+@@ -390,7 +516,7 @@ class PresentationPanel:
+         device = decoder.device
+         self._converter = PacketConverter(
+             device,
+-            load_magnetometer_calibrations(options.mag_calibration),
++            load_magnetometer_calibrations(options.mag_calibration, device),
+             tuple(device.calibration(index) for index in range(BMP_COUNT)),
+             calibration=None,
+             remove_gravity=self.remove_gravity,
+@@ -415,6 +541,7 @@ class PresentationPanel:
+         self.status = self.widget.addLabel("", row=0, col=0, colspan=3)
+         self._plots: list[list[object]] = []
+         self._curves: list[list[list[object]]] = []
++        self._scalers: dict[tuple[int, int], AxisScaler] = {}
+ 
+         for sensor in range(SENSOR_COUNT):
+             row_plots = []
+@@ -428,7 +555,7 @@ class PresentationPanel:
+                 if quantity == 0:
+                     plot.setLabel("left", f"ICM{sensor} (canal {self._channel(sensor)})")
+                 plot.setXRange(-self.window_seconds, 0, padding=0)
+-                plot.getViewBox().setLimits(minYRange=MINIMUM_SPANS[quantity])
++                plot.enableAutoRange("y", False)
+                 curves = [
+                     plot.plot(
+                         pen=pg.mkPen(AXIS_COLORS[axis], width=2),
+@@ -439,15 +566,17 @@ class PresentationPanel:
+                 ]
+                 row_plots.append(plot)
+                 row_curves.append(curves)
++                self._scalers[(sensor, quantity)] = AxisScaler(
++                    MINIMUM_SPANS[quantity]
++                )
+             self._plots.append(row_plots)
+             self._curves.append(row_curves)
+ 
+         self.pressure_plot = self.widget.addPlot(row=4, col=0, colspan=2)
+         self.pressure_plot.showGrid(x=True, y=True, alpha=0.25)
+         self.pressure_plot.setTitle("Barometros: desvio da referencia (Pa)")
+-        self.pressure_plot.getViewBox().setLimits(
+-            minYRange=MINIMUM_SPAN_PRESSURE_PA
+-        )
++        self.pressure_plot.enableAutoRange("y", False)
++        self._pressure_scaler = AxisScaler(MINIMUM_SPAN_PRESSURE_PA)
+         self.pressure_plot.setLabel("bottom", "tempo (s)")
+         self.pressure_curves = [
+             self.pressure_plot.plot(
+@@ -459,9 +588,8 @@ class PresentationPanel:
+         self.altitude_plot = self.widget.addPlot(row=4, col=2)
+         self.altitude_plot.showGrid(x=True, y=True, alpha=0.25)
+         self.altitude_plot.setTitle("Altitude relativa (cm)")
+-        self.altitude_plot.getViewBox().setLimits(
+-            minYRange=MINIMUM_SPAN_ALTITUDE_CM
+-        )
++        self.altitude_plot.enableAutoRange("y", False)
++        self._altitude_scaler = AxisScaler(MINIMUM_SPAN_ALTITUDE_CM)
+         self.altitude_plot.setLabel("bottom", "tempo (s)")
+         self.altitude_curves = [
+             self.altitude_plot.plot(
+@@ -470,7 +598,8 @@ class PresentationPanel:
+             for index in range(BMP_COUNT)
+         ]
+ 
+-        self.footer = self.widget.addLabel("", row=5, col=0, colspan=3)
++        self.altitude_readout = self.widget.addLabel("", row=5, col=0, colspan=3)
++        self.footer = self.widget.addLabel("", row=6, col=0, colspan=3)
+         self._all_plots = [
+             plot for row in self._plots for plot in row
+         ] + [self.pressure_plot, self.altitude_plot]
+@@ -487,6 +616,7 @@ class PresentationPanel:
+             ("F", self.toggle_imu_filter),
+             ("B", self.toggle_pressure_filter),
+             ("D", self.toggle_decimation),
++            ("Z", self.rezero_altitude),
+             ("Up", lambda: self.adjust_window(WINDOW_STEP_SECONDS)),
+             ("Down", lambda: self.adjust_window(-WINDOW_STEP_SECONDS)),
+             ("Q", self.widget.close),
+@@ -539,6 +669,38 @@ class PresentationPanel:
+     def toggle_decimation(self) -> None:
+         self.decimate = not self.decimate
+ 
++    def rezero_altitude(self) -> None:
++        """Adopt the current reading as the new altitude datum.
++
++        Faster than a full recalibration and the usual fix when a barometer was
++        still settling at startup: it needs no stillness, only the device where
++        you want zero to be.
++        """
++        calibration = self._converter.calibration
++        if calibration is None or not self._recent:
++            return
++        references = list(calibration.reference_pressure_hpa)
++        drifts = list(calibration.pressure_drift_hpa)
++        for index in range(BMP_COUNT):
++            readings = [
++                compensated_pressure_hpa(
++                    packet, index, self._converter.bmp_calibrations[index]
++                )[0]
++                for packet in self._recent
++            ]
++            usable = [value for value in readings if not math.isnan(value)]
++            if usable:
++                references[index] = statistics.median(usable)
++                drifts[index] = 0.0
++        self._converter.calibration = RestCalibration(
++            samples=calibration.samples,
++            gyro_bias_dps=calibration.gyro_bias_dps,
++            gravity_mps2=calibration.gravity_mps2,
++            gravity_norm_mps2=calibration.gravity_norm_mps2,
++            reference_pressure_hpa=tuple(references),
++            pressure_drift_hpa=tuple(drifts),
++        )
++
+     def restart_calibration(self) -> None:
+         self.calibrating = True
+         self._calibration_packets = []
+@@ -589,6 +751,7 @@ class PresentationPanel:
+             self._decoder.device,
+             self._converter.bmp_calibrations,
+         )
++        self._converter.reset_gravity_tracking()
+         self._calibration_packets = []
+         self.calibrating = False
+ 
+@@ -634,6 +797,8 @@ class PresentationPanel:
+         for sensor in range(SENSOR_COUNT):
+             for quantity in range(3):
+                 base = sensor * 9 + quantity * 3
++                lowest = math.inf
++                highest = -math.inf
+                 for axis in range(3):
+                     axis_times, axis_values = self._series(
+                         times, imu[:, base + axis], imu_samples
+@@ -641,6 +806,15 @@ class PresentationPanel:
+                     self._curves[sensor][quantity][axis].setData(
+                         axis_times, axis_values
+                     )
++                    if axis_values.size:
++                        lowest = min(lowest, float(axis_values.min()))
++                        highest = max(highest, float(axis_values.max()))
++                self._apply_scale(
++                    self._plots[sensor][quantity],
++                    self._scalers[(sensor, quantity)],
++                    lowest,
++                    highest,
++                )
+ 
+         pressure_samples = (
+             max(
+@@ -652,20 +826,60 @@ class PresentationPanel:
+             if self.filter_pressure
+             else 1
+         )
++        pressure_low, pressure_high = math.inf, -math.inf
++        altitude_low, altitude_high = math.inf, -math.inf
+         for index in range(BMP_COUNT):
+             pressure_times, pressure = self._series(
+                 times, baro[:, COLUMN_PRESSURE + index], pressure_samples
+             )
+             self.pressure_curves[index].setData(pressure_times, pressure)
++            if pressure.size:
++                pressure_low = min(pressure_low, float(pressure.min()))
++                pressure_high = max(pressure_high, float(pressure.max()))
++
+             altitude_times, altitude = self._series(
+                 times, baro[:, COLUMN_ALTITUDE + index], pressure_samples
+             )
+             self.altitude_curves[index].setData(altitude_times, altitude)
++            if altitude.size:
++                altitude_low = min(altitude_low, float(altitude.min()))
++                altitude_high = max(altitude_high, float(altitude.max()))
+             self._latest_altitude[index] = (
+                 float(altitude[-1]) if altitude.size else math.nan
+             )
++        self._apply_scale(
++            self.pressure_plot, self._pressure_scaler, pressure_low, pressure_high
++        )
++        self._apply_scale(
++            self.altitude_plot, self._altitude_scaler, altitude_low, altitude_high
++        )
++        self._update_altitude_readout()
+         self._update_footer(baro)
+ 
++    def _apply_scale(
++        self, plot, scaler: AxisScaler, lowest: float, highest: float
++    ) -> None:
++        if self.scale_locked or not math.isfinite(lowest) or not math.isfinite(highest):
++            return
++        low, high = scaler.update(lowest, highest)
++        plot.setYRange(low, high, padding=0)
++
++    def _update_altitude_readout(self) -> None:
++        cells = []
++        for index in range(BMP_COUNT):
++            value = self._latest_altitude[index]
++            colour = AXIS_COLORS[index]
++            text = "--" if math.isnan(value) else f"{value:+0.0f}"
++            cells.append(
++                f"<span style='color:{colour}'>BMP{index}"
++                f"<span style='font-size:30pt'><b> {text}</b></span> cm</span>"
++            )
++        self.altitude_readout.setText(
++            "<span style='font-size:15pt'>Altitude &nbsp;&nbsp; "
++            + "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;".join(cells)
++            + "</span>"
++        )
++
+     def _update_calibration_label(self) -> None:
+         remaining = max(
+             0.0,
+@@ -730,17 +944,31 @@ class PresentationPanel:
+         )
+         # The filtered value, never the last raw sample: a single unfiltered
+         # reading swings by tens of centimetres and reads as a broken sensor.
+-        altitudes = " ".join(
+-            f"BMP{index}={self._latest_altitude[index]:+0.1f}cm"
+-            for index in range(BMP_COUNT)
+-        )
+         pressures = " ".join(
+             f"BMP{index}={latest[COLUMN_ABSOLUTE_PRESSURE + index]:0.2f}hPa"
+             for index in range(BMP_COUNT)
+         )
++        warnings = ""
++        if calibration is not None and calibration.valid:
++            references = " ".join(
++                f"BMP{index}="
++                + ("--" if value is None else f"{value:0.2f}")
++                for index, value in enumerate(calibration.reference_pressure_hpa)
++            )
++            warnings = f"referencia {references} hPa &middot; "
++            if not calibration.pressure_settled:
++                warnings += (
++                    "<span style='color:#b26a00'><b>barometro ainda assentava na "
++                    "calibracao, use Z para re-zerar</b></span> &middot; "
++                )
++            elif not calibration.barometers_agree:
++                warnings += (
++                    "<span style='color:#b26a00'><b>referencias discordam, use Z"
++                    "</b></span> &middot; "
++                )
+         states = " &middot; ".join(
+             (
+-                f"gravidade {'removida' if self.remove_gravity else 'presente'}",
++                f"gravidade {'removida (adaptativa)' if self.remove_gravity else 'presente'}",
+                 f"escala {'travada' if self.scale_locked else 'automatica'}",
+                 f"filtro barometro {'ligado' if self.filter_pressure else 'desligado'}",
+                 f"filtro IMU {'ligado' if self.filter_imu else 'desligado'}",
+@@ -750,11 +978,12 @@ class PresentationPanel:
+         )
+         self.footer.setText(
+             f"<span style='font-size:11pt'>{gravity}"
+-            f"altitude filtrada {altitudes} &middot; pressao {pressures} &middot; "
+-            f"temperatura {temperatures}<br>{states}<br>"
++            f"pressao {pressures} &middot; "
++            f"temperatura {temperatures}<br>{warnings}{states}<br>"
+             "espaco pausa &middot; G gravidade &middot; L escala &middot; "
+             "F filtro IMU &middot; B filtro barometro &middot; D repetidos "
+-            "&middot; R recalibrar &middot; setas janela &middot; Q sair</span>"
++            "&middot; Z re-zerar altitude &middot; R recalibrar &middot; "
++            "setas janela &middot; Q sair</span>"
+         )
+ 
+ 
+diff --git a/python/tests/test_calibrate_magnetometer.py b/python/tests/test_calibrate_magnetometer.py
+index e385e58..175436d 100644
+--- a/python/tests/test_calibrate_magnetometer.py
++++ b/python/tests/test_calibrate_magnetometer.py
+@@ -1,13 +1,47 @@
++import json
+ import sys
++import tempfile
+ import unittest
+ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ 
+-from calibrate_magnetometer import estimate_calibration
++from calibrate_magnetometer import (
++    AxisExtremes,
++    build_document,
++    estimate_calibration,
++)
++from parse_data import MAG_UT_PER_COUNT
++from presentation_panel import load_magnetometer_calibrations
++from test_presentation_monitor import StreamDecoder, healthy_bmp, make_packet
+ 
+ 
+-class CalibrateMagnetometerTest(unittest.TestCase):
++def rotation_stream(count: int = 400, amplitude: int = 400) -> bytes:
++    """A capture that sweeps every magnetic axis wide enough to calibrate."""
++    import math
++
++    packets = []
++    for index in range(count):
++        angle = 2.0 * math.pi * index / count
++        values = []
++        for sensor in range(3):
++            offset = 50 * sensor  # a different hard iron on each sensor
++            values.extend((0, 0, 4096))
++            values.extend((0, 0, 0))
++            values.extend(
++                (
++                    offset + int(amplitude * math.cos(angle)),
++                    offset + int(amplitude * math.sin(angle)),
++                    offset + int(amplitude * math.cos(angle + 1.0)),
++                )
++            )
++        packets.append(
++            make_packet(index * 10_000, index, tuple(values), healthy_bmp(index))
++        )
++    return b"".join(packets)
++
++
++class EstimateCalibrationTest(unittest.TestCase):
+     def test_estimates_offsets_and_diagonal_scale(self):
+         hard_iron, matrix = estimate_calibration(
+             (-200, -100, -300), (400, 500, 300), minimum_axis_span_ut=10
+@@ -20,5 +54,107 @@ class CalibrateMagnetometerTest(unittest.TestCase):
+             estimate_calibration((-5, -5, -5), (5, 5, 5))
+ 
+ 
++class AxisExtremesTest(unittest.TestCase):
++    def test_tracks_the_extremes_of_every_axis(self):
++        extremes = AxisExtremes()
++        for packet in StreamDecoder().feed(rotation_stream()):
++            extremes.add(packet)
++
++        self.assertEqual(extremes.packets, 400)
++        for sensor in range(3):
++            for axis in range(3):
++                span = extremes.maximum[sensor][axis] - extremes.minimum[sensor][axis]
++                self.assertGreater(span, 700)
++
++    def test_coverage_reports_the_span_in_microtesla(self):
++        extremes = AxisExtremes()
++        for packet in StreamDecoder().feed(rotation_stream()):
++            extremes.add(packet)
++        coverage = extremes.coverage_ut()
++        self.assertEqual(len(coverage), 3)
++        self.assertAlmostEqual(
++            coverage[0][0],
++            (extremes.maximum[0][0] - extremes.minimum[0][0]) * MAG_UT_PER_COUNT,
++        )
++
++    def test_an_empty_capture_is_refused(self):
++        with self.assertRaises(ValueError):
++            build_document(AxisExtremes(), 20.0, {"source": "file"})
++
++
++class BuildDocumentTest(unittest.TestCase):
++    def setUp(self):
++        self.extremes = AxisExtremes()
++        for packet in StreamDecoder().feed(rotation_stream()):
++            self.extremes.add(packet)
++
++    def test_records_one_entry_per_sensor(self):
++        document = build_document(self.extremes, 20.0, {"source": "file"})
++        self.assertEqual(document["packet_count"], 400)
++        for sensor in range(3):
++            entry = document[f"icm{sensor}"]
++            self.assertEqual(len(entry["hard_iron_ut"]), 3)
++            self.assertEqual(len(entry["soft_iron_matrix"]), 3)
++
++    def test_recovers_the_offset_that_was_injected(self):
++        document = build_document(self.extremes, 20.0, {"source": "file"})
++        # Each sensor carried a different constant offset in raw counts.
++        for sensor in range(3):
++            expected = 50 * sensor * MAG_UT_PER_COUNT
++            self.assertAlmostEqual(
++                document[f"icm{sensor}"]["hard_iron_ut"][0], expected, delta=0.2
++            )
++
++    def test_records_the_channel_when_it_is_known(self):
++        document = build_document(
++            self.extremes, 20.0, {"source": "live"}, {0: "4", 1: "5", 2: "6"}
++        )
++        self.assertEqual(document["icm2"]["mux_channel"], "6")
++
++    def test_omits_the_channel_when_it_is_unknown(self):
++        document = build_document(self.extremes, 20.0, {"source": "file"})
++        self.assertNotIn("mux_channel", document["icm0"])
++
++
++class ChannelGuardTest(unittest.TestCase):
++    """A calibration must never be applied to the sensor it was not measured on."""
++
++    def setUp(self):
++        from test_presentation_monitor import ready_device
++
++        self.device = ready_device()  # channels 4, 5 and 6
++        self.extremes = AxisExtremes()
++        for packet in StreamDecoder().feed(rotation_stream()):
++            self.extremes.add(packet)
++
++    def write(self, channels):
++        document = build_document(self.extremes, 20.0, {"source": "live"}, channels)
++        folder = tempfile.mkdtemp()
++        path = Path(folder) / "mag.json"
++        path.write_text(json.dumps(document), encoding="utf-8")
++        return path
++
++    def test_matching_channels_are_accepted(self):
++        path = self.write({0: "4", 1: "5", 2: "6"})
++        calibrations = load_magnetometer_calibrations(path, self.device)
++        self.assertEqual(len(calibrations), 3)
++
++    def test_the_old_channel_map_is_refused(self):
++        # The assignment before the hardware change was 0, 1 and 4.
++        path = self.write({0: "0", 1: "1", 2: "4"})
++        with self.assertRaises(ValueError) as caught:
++            load_magnetometer_calibrations(path, self.device)
++        self.assertIn("channel 0", str(caught.exception))
++
++    def test_a_file_without_channels_is_still_accepted(self):
++        path = self.write(None)
++        calibrations = load_magnetometer_calibrations(path, self.device)
++        self.assertEqual(len(calibrations), 3)
++
++    def test_no_device_means_no_check(self):
++        path = self.write({0: "0", 1: "1", 2: "4"})
++        self.assertEqual(len(load_magnetometer_calibrations(path, None)), 3)
++
++
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/python/tests/test_presentation_panel.py b/python/tests/test_presentation_panel.py
+index 9f1fcc5..10baf41 100644
+--- a/python/tests/test_presentation_panel.py
++++ b/python/tests/test_presentation_panel.py
+@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ 
+ from parse_data import MagnetometerCalibration
+ from presentation_panel import (
++    AxisScaler,
+     BARO_COLUMNS,
+     COLUMN_ABSOLUTE_PRESSURE,
+     COLUMN_ALTITUDE,
+@@ -231,6 +232,128 @@ class PacketConverterTest(unittest.TestCase):
+         self.assertTrue(math.isnan(row[COLUMN_ALTITUDE]))
+ 
+ 
++class AxisScalerTest(unittest.TestCase):
++    def test_first_update_adopts_the_data(self):
++        low, high = AxisScaler(minimum_span=2.0).update(-5.0, 5.0)
++        self.assertLess(low, -5.0)
++        self.assertGreater(high, 5.0)
++
++    def test_never_zooms_tighter_than_the_minimum_span(self):
++        low, high = AxisScaler(minimum_span=10.0).update(-0.01, 0.01)
++        self.assertGreaterEqual(high - low, 10.0)
++
++    def test_growth_is_immediate(self):
++        scaler = AxisScaler(minimum_span=1.0)
++        scaler.update(-1.0, 1.0)
++        low, high = scaler.update(-100.0, 100.0)
++        # A spike must never be clipped, so the wider range applies at once.
++        self.assertLessEqual(low, -100.0)
++        self.assertGreaterEqual(high, 100.0)
++
++    def test_shrinking_is_gradual(self):
++        scaler = AxisScaler(minimum_span=1.0, shrink_rate=0.1)
++        scaler.update(-100.0, 100.0)
++        low, high = scaler.update(-1.0, 1.0)
++        # Still wide right after the spike: this is what stops the breathing.
++        self.assertLess(low, -50.0)
++        self.assertGreater(high, 50.0)
++
++    def test_shrinking_eventually_reaches_the_target(self):
++        scaler = AxisScaler(minimum_span=1.0, shrink_rate=0.2)
++        scaler.update(-100.0, 100.0)
++        for _ in range(300):
++            low, high = scaler.update(-1.0, 1.0)
++        self.assertAlmostEqual(high - low, 2.0 * 1.1, delta=0.1)
++
++
++class AdaptiveGravityTest(unittest.TestCase):
++    def setUp(self):
++        self.device = ready_device()
++        self.bmp = tuple(self.device.calibration(index) for index in range(2))
++        self.mag = (MagnetometerCalibration(),) * 3
++        self.packets = decode(healthy_stream())
++        self.calibration = calibrate_at_rest(self.packets, self.device, self.bmp)
++
++    def test_a_reoriented_sensor_returns_to_zero(self):
++        from test_presentation_monitor import healthy_bmp, healthy_values
++
++        converter = PacketConverter(
++            self.device, self.mag, self.bmp, self.calibration, remove_gravity=True
++        )
++        converter.reset_gravity_tracking()
++
++        # Gravity now lies on x instead of z, as if the sensor were laid on its
++        # side after calibration. A frozen vector would leave this offset for
++        # the rest of the session.
++        values = list(healthy_values(0))
++        values[0], values[2] = values[2], values[0]
++        rotated = decode(
++            b"".join(
++                make_packet(i * 10_000, i, tuple(values), healthy_bmp(i))
++                for i in range(1500)
++            )
++        )
++
++        first = converter.imu_row(rotated[0])
++        self.assertGreater(abs(first[0]), 5.0)
++        for packet in rotated:
++            last = converter.imu_row(packet)
++        for axis in range(3):
++            self.assertAlmostEqual(last[axis], 0.0, delta=0.2)
++
++    def test_the_estimate_follows_even_while_gravity_is_shown(self):
++        converter = PacketConverter(
++            self.device, self.mag, self.bmp, self.calibration, remove_gravity=False
++        )
++        converter.reset_gravity_tracking()
++        for packet in self.packets:
++            row = converter.imu_row(packet)
++        # Showing gravity must report the real vector, not a centred one.
++        self.assertAlmostEqual(
++            math.sqrt(sum(value * value for value in row[0:3])), 9.807, places=2
++        )
++        # Toggling now must not produce a step, so the tracker had to keep up.
++        converter.remove_gravity = True
++        centred = converter.imu_row(self.packets[-1])
++        for axis in range(3):
++            self.assertAlmostEqual(centred[axis], 0.0, delta=0.05)
++
++
++class PressureReferenceTest(unittest.TestCase):
++    def setUp(self):
++        self.device = ready_device()
++        self.bmp = tuple(self.device.calibration(index) for index in range(2))
++
++    def test_steady_capture_is_reported_as_settled(self):
++        calibration = calibrate_at_rest(
++            decode(healthy_stream()), self.device, self.bmp
++        )
++        self.assertTrue(calibration.pressure_settled)
++        self.assertTrue(calibration.barometers_agree)
++
++    def test_disagreeing_datums_are_detected(self):
++        calibration = RestCalibration(
++            samples=10,
++            gyro_bias_dps=((0.0, 0.0, 0.0),) * 3,
++            gravity_mps2=((0.0, 0.0, 9.8),) * 3,
++            gravity_norm_mps2=(9.8,) * 3,
++            reference_pressure_hpa=(1009.70, 1007.50),
++        )
++        # The two sit on one board; two hectopascal apart is eighteen metres.
++        self.assertFalse(calibration.barometers_agree)
++
++    def test_drift_during_calibration_is_detected(self):
++        calibration = RestCalibration(
++            samples=10,
++            gyro_bias_dps=((0.0, 0.0, 0.0),) * 3,
++            gravity_mps2=((0.0, 0.0, 9.8),) * 3,
++            gravity_norm_mps2=(9.8,) * 3,
++            reference_pressure_hpa=(1009.70, 1009.70),
++            pressure_drift_hpa=(0.0, 1.5),
++        )
++        self.assertFalse(calibration.pressure_settled)
++
++
+ class TrailingAverageTest(unittest.TestCase):
+     def test_window_of_one_changes_nothing(self):
+         values = np.array([1.0, 5.0, 3.0])

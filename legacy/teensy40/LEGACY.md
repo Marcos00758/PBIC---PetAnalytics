@@ -1,0 +1,1 @@
+O diretório legacy/ contém apenas código e documentação da antiga plataforma Nicla Voice. Nenhum arquivo desse diretório deve ser utilizado para desenvolver o firmware atual, exceto como referência de algoritmos ou formato de dados. Toda implementação nova deve considerar exclusivamente a arquitetura baseada na Teensy 4.0. criando um código novo.
