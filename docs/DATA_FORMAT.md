@@ -1,5 +1,15 @@
 # Formato de dados
 
+## Etapa de preparação ESP32-S3
+
+O programa `esp32s3_setup.cpp` emite somente diagnóstico textual e não cria
+arquivos no cartão nem transmite pacotes de sensores. A estrutura v4 abaixo
+permanece a referência da aplicação existente e da futura migração.
+O tamanho, campos e CRC não foram alterados; apenas a documentação do mapa
+físico foi alinhada à montagem confirmada (ICMs 4/5/6 e BMPs 7/3).
+Capturas antigas devem ser interpretadas conforme seus metadados de sessão,
+sem atribuir retroativamente a elas a pinagem/canais da montagem atual.
+
 ## Pacote de sensores v4
 
 O firmware transmite pela USB um fluxo binario de tamanho fixo. Cada pacote
@@ -20,8 +30,8 @@ assume a configuracao atual v4 de `2000 graus/s`.
 | 2 | 4 | `uint32` | `timestamp_us` | `micros()` no inicio da rodada |
 | 6 | 2 | `uint16` | `sequence` | Sequencia com retorno a zero apos 65535 |
 | 8 | 54 | `27 x int16` | `values` | Accel, gyro e mag dos tres ICMs |
-| 62 | 4 | `uint32` | `bmp0_pressure_raw` | Pressao crua BMP390, canal 2 |
-| 66 | 4 | `uint32` | `bmp0_temperature_raw` | Temperatura crua BMP390, canal 2 |
+| 62 | 4 | `uint32` | `bmp0_pressure_raw` | Pressao crua BMP390, canal 7 |
+| 66 | 4 | `uint32` | `bmp0_temperature_raw` | Temperatura crua BMP390, canal 7 |
 | 70 | 4 | `uint32` | `bmp1_pressure_raw` | Pressao crua BMP390, canal 3 |
 | 74 | 4 | `uint32` | `bmp1_temperature_raw` | Temperatura crua BMP390, canal 3 |
 | 78 | 1 | `uint8` | `crc8` | CRC dos bytes 0 a 77 |
@@ -41,8 +51,8 @@ icm1_ax, icm1_ay, icm1_az, icm1_gx, icm1_gy, icm1_gz, icm1_mx, icm1_my, icm1_mz,
 icm2_ax, icm2_ay, icm2_az, icm2_gx, icm2_gy, icm2_gz, icm2_mx, icm2_my, icm2_mz
 ```
 
-Mapeamento: ICM0 canal 0, ICM1 canal 1, BMP0 canal 2, BMP1 canal 3 e ICM2
-canal 4 do PCA9548A.
+Mapeamento confirmado: ICM0 canal 4, ICM1 canal 5, BMP0 canal 7, BMP1 canal 3
+e ICM2 canal 6 do PCA9548A.
 
 ## CRC-8
 

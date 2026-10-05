@@ -95,12 +95,13 @@ static_assert(!(kMicrophoneDiagnosticEnabled && kAudioSdDiagnosticEnabled),
 constexpr uint8_t kPca9548aAddress = 0x70;
 constexpr uint16_t kPcaChannelSettleUs = 80;
 
-constexpr uint8_t kIcm0Channel = 0;
-constexpr uint8_t kIcm1Channel = 1;
-constexpr uint8_t kIcm2Channel = 4;
+// Confirmed latest Teensy assembly, retained for the ESP32-S3 hardware.
+constexpr uint8_t kIcm0Channel = 4;
+constexpr uint8_t kIcm1Channel = 5;
+constexpr uint8_t kIcm2Channel = 6;
 constexpr uint8_t kIcmSensorCount = 3;
 
-constexpr uint8_t kBmp0Channel = 2;
+constexpr uint8_t kBmp0Channel = 7;
 constexpr uint8_t kBmp1Channel = 3;
 constexpr uint8_t kBmpCandidateAddresses[] = {0x77, 0x76};
 constexpr uint8_t kBmpExpectedChipId = 0x60;

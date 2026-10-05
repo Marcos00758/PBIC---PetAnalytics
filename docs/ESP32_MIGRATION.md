@@ -1,9 +1,53 @@
 # Decisões para a migração ao ESP32-S3
 
-Registro de 2026-10-05. Destino informado: placa OEM ESP32-S3 Super Mini com
-ESP32-S3FH4R2. Esta alteração preserva a etapa Teensy e suspende o áudio;
-**a migração do firmware e da pinagem ainda não foi implementada**.
-O build ativo continua `teensy40`. A arquitetura elétrica da nova placa está pendente.
+Registro de 2026-10-05, atualizado após confirmação do hardware pelo usuário.
+Destino: placa OEM ESP32-S3 Super Mini com ESP32-S3FH4R2.
+O ambiente padrão agora é `esp32s3_supermini`, com uma entrada de preparação
+separada. A aquisição e o logger ainda precisam ser portados para esse ambiente.
+
+## Hardware e PlatformIO confirmados
+
+- I2C do PCA9548A: SDA GPIO1, SCL GPIO2, 400 kHz.
+- SD SPI: SCK GPIO4, MISO GPIO5, MOSI GPIO6, CS GPIO7.
+- PCA9548A mantido: ICM0/1/2 nos canais 4/5/6; BMP0/1 nos canais 7/3.
+  O mapa antigo da `main` foi corrigido em `constants.h` após confirmação.
+- Alimentação: bateria externa com conversor regulado de 5 V na USB-C.
+  O SD será alimentado pelo ESP32. Módulo informado: "Modulo Adaptador Cartão
+  Micro Sd Tf Card Arduino Esp32 Pic", anúncio MLBU2296492711/MLB3617781629,
+  registrado em HARDWARE_SPEC.md. A consulta ao anúncio foi bloqueada (403);
+  circuito/revisão física e tensão de VCC continuam pendentes de confirmação.
+- GPIO19/20 reservados para USB. GPIO48 reservado ao WS2812, sem driver LED ativo.
+- Perfil `esp32-s3-devkitc-1` com overrides explícitos: flash 4 MB,
+  partições `default.csv` de 4 MB, flash QIO a 80 MHz, PSRAM Quad SPI
+  (`qio_qspi`, `BOARD_HAS_PSRAM`). CPU 240 MHz.
+- USB Serial/JTAG CDC no boot, modo 1 herdado da placa-base. HID não ativado.
+- `espressif32@7.1.3` e `greiman/SdFat@2.3.1` fixados no novo ambiente.
+  O pacote do core Arduino 2.0.17 também é fixado explicitamente em
+  `platformio/framework-arduinoespressif32@4.20017.260907+sha.dcc1105b`,
+  conforme a versão instalada e compilada, para evitar resolução futura diferente.
+  O ambiente Teensy conserva as bibliotecas de SD fornecidas por seu core.
+
+Preferimos overrides do perfil suportado a um JSON próprio nesta primeira
+etapa: são suficientes para memória/USB e evitam duplicar metadados do uploader.
+Isso não transforma a placa OEM em uma DevKitC: pinagem externa, memórias e
+descrição elétrica são as de [HARDWARE_SPEC.md](HARDWARE_SPEC.md).
+O nome genérico N8/"No PSRAM" ainda aparece no cabeçalho do PlatformIO;
+os overrides efetivos, e não esse nome, definem flash/PSRAM. O build utiliza
+os headers SDK `esp32s3/qio_qspi` e a tabela de partições de 4 MB. O limite
+estático de RAM reportado pelo PlatformIO é o do perfil/core (320 KiB), não a
+soma física de SRAM e PSRAM. A detecção de PSRAM precisa da placa ligada.
+
+`src/bringup/esp32s3_setup.cpp` é a única fonte compilada no novo ambiente.
+Inicializa I2C/SPI na pinagem confirmada, mantém CS alto e informa flash/PSRAM
+reais via USB a cada cinco segundos, permitindo abrir o monitor depois do boot.
+Espera-se `flash_bytes=4194304`, `psram_bytes=2097152` e `memory_config_ok=1`.
+Ainda não monta ou escreve no SD, não acessa os cinco sensores, não coleta áudio
+e não inicia Wi-Fi/BLE. A pausa de 1 ms no loop de preparação cede CPU;
+não é um agendador de aquisição. Não confundir esse programa com o futuro
+teste de robustez do SD ou com o firmware final de coleta.
+
+O anúncio OEM informado não abriu pela ferramenta de pesquisa. Recursos de
+carga/BOOST e layout vêm da descrição fornecida e aguardam validação elétrica.
 
 ## Bibliotecas pesquisadas
 
@@ -34,8 +78,8 @@ deverá decidir frequência SPI, blocos e estratégia de pré-alocação por med
 
 Na pesquisa, `platformio/espressif32` **7.1.3** referencia o pacote Arduino
 `~4.20017.0` (core **2.0.17**). Versão da plataforma não é versão do core.
-Esse conjunto é um candidato para a primeira migração Arduino, ainda não
-instalado/validado aqui. As APIs I2S recentes do core 3.x não devem ser copiadas
+Esse conjunto foi selecionado para a preparação Arduino. As APIs I2S
+recentes do core 3.x não devem ser copiadas
 para um projeto no core 2.x. Se a retomada do áudio justificar atualizar o core,
 registrar e testar essa mudança separadamente.
 
@@ -54,6 +98,14 @@ Fontes primárias consultadas:
 - [I2S Arduino-ESP32 atual, para futura avaliação](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/i2s.html).
 
 ## Suspensão do áudio implementada
+
+**Contexto do registro anterior:** as alterações de suspensão abaixo foram
+feitas na branch `presentation`. Ao voltar à `main`, somente o snapshot,
+os registros de migração e `audio_types.h` haviam sido incluídos; a aplicação
+Teensy da `main` ainda contém os caminhos antigos de áudio. O build ESP32 atual
+exclui toda essa aplicação e todos os módulos de áudio por seu filtro de fontes.
+Não interpretar os passos abaixo como uma descrição do ambiente Teensy atual
+da `main`. A retomada de áudio permanece fora do escopo do ESP32.
 
 Motivo: validar primeiro apenas três ICM-20948 e dois BMP390, sem a carga
 de captura, interrupções e escrita de áudio, nem dependências exclusivas do Teensy.
@@ -78,9 +130,9 @@ de captura, interrupções e escrita de áudio, nem dependências exclusivas do 
    permanecem disponíveis para ler dados históricos. Não fazem coleta ou
    ativação de áudio na placa. Nenhum dado antigo foi apagado.
 
-O modo de apresentação existente permanece selecionado nesta alteração;
-a volta à gravação SD e a coleta sem filtros pertencem à próxima integração.
-Nenhum filtro foi acrescentado nem os filtros existentes foram alterados aqui.
+Na etapa `presentation` o modo de apresentação permaneceu selecionado.
+Na preparação ESP32 atual não há aquisição. A volta à gravação SD e a coleta
+sem filtros pertencem à próxima integração. Nenhum filtro foi acrescentado.
 
 ## Como retomar áudio posteriormente
 
@@ -133,13 +185,30 @@ e os detalhes de pré-alocação exFAT da versão SdFat escolhida.
 
 ## Próximas validações
 
-Receber pinagem/esquema OEM, alimentação, módulo/cartão SD e interface USB.
-Configurar flash/PSRAM para o modelo real, depois compilar e testar SdFat de
+Pinagem externa, canais, alimentação por conversor e USB foram definidos.
+Confirmar circuito e VCC do módulo SD já identificado comercialmente, cartão
+utilizado, corrente do conversor/regulador e detalhes do
+esquema OEM. Validar flash/PSRAM/USB na placa, depois testar SdFat de
 forma isolada. Portar os cinco sensores, conferir a compensação dos BMP390 com
 dados crus/NVM, restaurar gravação SD e testar tarefas/fila sob carga prolongada.
 Sem filtros de sensores ou pós-processamento na nova coleta, conforme pedido.
 
-## Validação desta alteração
+## Validação da preparação atual
+
+**Validação da preparação atual em 2026-10-05:** dependências instaladas e
+build `esp32s3_supermini` aprovado com o core exato fixado, SdFat 2.3.1,
+SDK `qio_qspi`, USB modo 1 e `BOARD_HAS_PSRAM`. Firmware de preparação:
+19.316 bytes de RAM estática e 281.305 bytes de flash. A tabela binária de
+partições foi conferida: todas as partições cabem nos 4 MiB físicos.
+O slot de aplicação do `default.csv` tem 1.310.720 bytes; os slots OTA e
+partições de dados reservados pela tabela não ativam serviços OTA/SPIFFS.
+O build explícito `teensy40` também passou após a atualização dos canais.
+`verify_snapshot.py` confirmou os 58 arquivos, patch e 44 dados experimentais
+do legado preservado. `git diff --check` passou. Nenhum upload foi realizado;
+detecção real de PSRAM/flash, USB, alimentação, sensores e cartão permanece
+pendente de teste na placa física.
+
+## Validação anterior da suspensão na branch presentation
 
 - Build PlatformIO `teensy40` aprovado antes e depois da suspensão.
   Pacotes locais utilizados: Teensyduino `1.162.0` (1.62), ferramentas Teensy

@@ -1,5 +1,36 @@
 # Arquitetura
 
+## Preparação ESP32-S3 em 2026-10-05
+
+O destino é a placa OEM ESP32-S3FH4R2. [HARDWARE_SPEC.md](HARDWARE_SPEC.md)
+consolida SDA/SCL GPIO1/2, SD SPI GPIO4/5/6/7, PCA9548A mantido e alimentação
+por conversor de 5 V na USB-C. ICM0/1/2 permanecem nos canais 4/5/6 e BMP0/1
+nos canais 7/3, conforme a montagem mais recente confirmada pelo usuário.
+
+O ambiente padrão `esp32s3_supermini` compila apenas
+`src/bringup/esp32s3_setup.cpp`: USB Serial/JTAG CDC, diagnóstico de flash/PSRAM
+e inicialização dos barramentos. Usa SdFat 2.3.1 externo; ainda não monta SD
+nem inicializa drivers dos sensores. O programa não produz pacotes v4.
+Os drivers e o logger existentes da main continuam na aplicação Teensy,
+selecionada explicitamente por `-e teensy40`. A fonte de preparação é excluída
+desse ambiente para evitar dois pontos de entrada.
+
+Esta separação permite compilar/validar memória e pinos antes de adaptar
+`SD.sdfs` e as interfaces Teensy. O filtro do ESP32 deixa áudio fora do build.
+FreeRTOS com produtor de sensores, fila limitada e consumidor SD permanece
+planejado; não houve implementação de concorrência nem de filtros nesta etapa.
+
+O snapshot em `legacy/teensy40/` não foi modificado. O registro de suspensão
+de áudio em ESP32_MIGRATION descreve também mudanças feitas na antiga branch
+presentation; elas não estavam integralmente na main após a troca de branch.
+A documentação distingue o perfil de preparação da aplicação Teensy existente.
+
+## Aplicação Teensy ainda não portada
+
+As seções abaixo documentam os serviços existentes e os experimentos Teensy.
+Não são o comportamento do ambiente de preparação ESP32. O mapa de canais foi
+alinhado à montagem confirmada; a migração dos serviços será feita em etapa própria.
+
 ## Hardware
 Microcontrolador:
 Teensy 4.0
@@ -10,15 +41,15 @@ Componentes conectados:
 Multiplexador: PCA9548A
 
 Sensores conectados ao PCA9548A:
-- Canal 0: ICM20948 #0
+- Canal 4: ICM20948 #0
 
-- Canal 1: ICM20948 #1
+- Canal 5: ICM20948 #1
 
-- Canal 2: BMP390 #0
+- Canal 7: BMP390 #0
 
 - Canal 3: BMP390 #1
 
-- Canal 4: ICM20948 #2
+- Canal 6: ICM20948 #2
 
 
 Todos utilizam 3,3 V.
@@ -40,7 +71,7 @@ BMM150 interno
 
 Nada disso deverá existir no novo firmware.
 
-Toda a arquitetura deve ser reescrita considerando exclusivamente a Teensy 4.0
+A migração seguirá o ESP32-S3; a arquitetura Teensy abaixo é referência dos serviços a portar.
 
 - Organização do código 
 

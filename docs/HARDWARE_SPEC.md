@@ -1,107 +1,125 @@
-# Hardware
-Teensy 4.0
+# Hardware — ESP32-S3 Super Mini OEM
 
-Todo o projeto trabalha em 3,3 V.
+Configuração consolidada em 2026-10-05 com a pinagem e as decisões informadas
+pelo usuário. A montagem Teensy está preservada em
+[legacy/teensy40/SNAPSHOT.md](../legacy/teensy40/SNAPSHOT.md).
 
-A Teensy substitui completamente a antiga Nicla Voice.
+## Placa e memórias
 
-Não existem mais:
+- Placa: OEM ESP32-S3 Super Mini, chip **ESP32-S3FH4R2**.
+- CPU: dois núcleos Xtensa LX7, até 240 MHz, instruções SIMD.
+- SRAM interna: 512 KiB; flash: **4 MiB Quad SPI**; PSRAM: **2 MiB Quad SPI**.
+- GPIOs: lógica de **3,3 V**. Alimentação da placa: USB-C em **5 V**.
+- USB nativa: GPIO19/D− e GPIO20/D+, reservados para o conector USB.
+- LED RGB WS2812: GPIO48, conforme descrição da placa. É endereçável;
+  `digitalWrite(LED_BUILTIN, ...)` do Teensy não serve como driver desse LED.
+- Wi-Fi e BLE disponíveis no chip; não ativados no firmware de preparação.
 
+Memórias/CPU confirmadas no [datasheet Espressif](https://documentation.espressif.com/esp32_s3_datasheet_en.pdf).
+O [anúncio informado](https://www.mercadolivre.com.br/p/MLB2097816970?pdp_filters=item_id:MLB7578990586)
+identifica a placa OEM. A ferramenta de pesquisa não conseguiu abrir o anúncio;
+detalhes de layout, antena e circuito de carga seguem a descrição fornecida pelo
+usuário e ainda não foram confrontados com esquema elétrico do fabricante.
 
-NDP120
-BMI270 interno
-BMM150 interno
-microfone interno
+## Pinagem externa confirmada
 
-Todo o código exclusivo do Nicla deverá ser removido e não implementado.
+Os números abaixo são **GPIOs do ESP32**, não posições físicas no conector.
 
-## Pinagem
-pinos - portas
+| Barramento/dispositivo | Sinal | GPIO |
+|---|---|---:|
+| I2C → PCA9548A | SDA | 1 |
+| I2C → PCA9548A | SCL | 2 |
+| SPI → microSD | SCK | 4 |
+| SPI → microSD | MISO | 5 |
+| SPI → microSD | MOSI | 6 |
+| SPI → microSD | CS | 7 |
 
-- PCA9548A:
-Teensy - PCA9548A
-18	- SDAW
-19	- SCL
-3V3	- VCC
-GND	- GND
+PCA9548A e sensores continuam na distribuição de 3V3/GND, com terra comum
+com ESP32 e SD. I2C configurado para 400 kHz. O CS do cartão é colocado em
+nível alto antes da inicialização do SPI. GPIO19/20 não serão usados como I2C.
+RESET do PCA9548A permanece sem controle por GPIO nesta etapa.
 
-RESET do PCA9548A não será utilizado.
+## Multiplexador e sensores
 
-- Cartão SD
-Teensy - SD
-11 - MOSI
-12 - MISO
-13 - CLK
-10 - CS
-3V3 - VCC
-GND - GND
+O **PCA9548A permanece**: os dispositivos são acessados após seleção de canal,
+evitando conflitos entre sensores com endereços iguais. Endereço do mux: `0x70`.
 
-O LED laranja integrado da Teensy 4.0 tambem esta ligado ao pino 13. Enquanto o
-SD estiver ativo, o firmware nao controla esse LED: qualquer atividade visivel
-e consequencia do clock SPI. Somente depois de uma falha definitiva do SD, com
-`CS` em nivel alto e SPI encerrado, o pino 13 pode ser reutilizado para piscar
-um codigo de erro.
+| Identidade lógica | Canal PCA9548A | Endereço I2C candidato |
+|---|---:|---|
+| ICM-20948 #0 | 4 | `0x69`, depois `0x68` |
+| ICM-20948 #1 | 5 | `0x69`, depois `0x68` |
+| ICM-20948 #2 | 6 | `0x69`, depois `0x68` |
+| BMP390 #0 | 7 | `0x77`, depois `0x76` |
+| BMP390 #1 | 3 | `0x77`, depois `0x76` |
 
-- Microfone ICS43434
-Teensy - Microfone
-21 - BCLK
-20 - LRCLK (WS)
-8 - DOUT
-GND - SEL
-3V3 - 3V3
-GND - GND
+Esse é o mapa da última montagem Teensy, confirmado pelo usuário para a nova
+montagem. A `main` continha o mapa anterior; `constants.h` foi alinhado ao mapa
+confirmado. Não alterar a identidade lógica dos sensores na leitura dos dados.
 
-SEL ficará permanentemente em GND (canal esquerdo).
+Breakouts mantidos: 3× Adafruit ICM-20948 STEMMA QT, 2× Adafruit BMP390
+STEMMA QT e Adafruit PCA9548A STEMMA QT. O pacote de sensores mantém três
+acelerômetros, três giroscópios, três AK09916 e dois pares pressão/temperatura.
 
-Na Teensy 4.0, a Audio Library oficial usa `BCLK=21`, `LRCLK=20` e entrada I2S
-`RX=8`. O modo mestre gera 44100 amostras por segundo em slots estereo de 32
-bits. O diagnostico inicial observa as duas portas da biblioteca para confirmar
-que o sinal do ICS43434 aparece somente no canal esquerdo.
+## Alimentação consolidada
 
-- Sensores conectados ao PCA9548A:
-Canal 0: ICM20948 #0
+Arquitetura confirmada:
 
-Canal 1: ICM20948 #1
+```text
+Bateria de lítio → conversor regulado para 5 V → USB-C do ESP32
+                                                ↓ regulador da placa
+                                              3V3/GND
+                                                ↓
+                                       PCA9548A e sensores
+```
 
-Canal 2: BMP390 #0
+O microSD será alimentado pelo próprio ESP32, conforme informado. Módulo
+identificado pelo usuário como **"Modulo Adaptador Cartão Micro Sd Tf Card
+Arduino Esp32 Pic"**, no
+[anúncio Mercado Livre MLBU2296492711 / MLB3617781629](https://www.mercadolivre.com.br/modulo-adaptador-cartao-micro-sd-tf-card-arduino-esp32-pic/up/MLBU2296492711?pdp_filters=item_id%3AMLB3617781629).
 
-Canal 3: BMP390 #1
+A consulta ao anúncio retornou **403 Forbidden** em 2026-10-05. O nome é uma
+denominação comercial genérica, sem identificação confirmada do fabricante,
+revisão da placa, regulador ou conversor de nível. **A tensão de entrada VCC
+do módulo continua pendente**; não inferir 3,3 V ou 5 V apenas por constar
+"Arduino/ESP32" no título.
 
-Canal 4: ICM20948 #2
+O cartão em si usa 3,3 V; a entrada do adaptador depende de seu circuito.
+Confirmar a tensão na descrição técnica ou identificar o circuito por fotos
+nítidas da frente/verso e marcações dos componentes antes de ligar VCC.
+Depois, medir a alimentação do cartão durante escrita e verificar se a saída
+escolhida da placa suporta seus picos junto aos sensores. Todos os sinais para
+o ESP32 devem ser 3,3 V. A pinagem SPI GPIO4/5/6/7 permanece confirmada.
 
+A célula não será ligada diretamente à USB-C. Pads BATTERY+/BATTERY− não
+fazem parte do caminho confirmado de alimentação; não presumir que o carregador
+da placa recarregará a bateria externa pelo conversor de 5 V. Proteção,
+carregamento da bateria externa, chave e capacidade/corrente do conversor
+continuam pendentes de especificação.
 
-- Alimentação
+Descrição fornecida da placa: pads para célula de lítio, carga de 100 mA e
+300 mA com BOOST fechado para baterias acima de 500 mAh. Esses valores são
+informações do anúncio, sem validação elétrica independente. O jumper não será
+alterado pelo software. A referência antiga de bateria 400 mAh pertence à
+montagem Teensy e não confirma a bateria desta montagem.
 
-Existe uma bateria LiPo
-3,7 V
-400 mAh
-modelo DTP502535
-com circuito de proteção (PCM).
+## USB e montagem
 
-Arquitetura:
+O perfil inicial usa USB nativa Serial/JTAG CDC (`ARDUINO_USB_MODE=1`), com
+CDC no boot; não usa adaptador USB-UART externo. HID/OTG poderá exigir outra
+configuração USB em etapa posterior. Os botões BOOT/RESET permitem entrada
+manual no bootloader se o primeiro upload não funcionar automaticamente.
 
-Bateria;
-Chave liga/desliga;
-VIN da Teensy
+A descrição OEM informa pads adicionais e furos castelados. A presença de um
+pad não garante disponibilidade de todos os GPIOs: conferir restrições de
+memória e strapping no datasheet antes de expandir a pinagem. A lista de pads
+do anúncio não foi validada contra um esquema do fabricante.
 
-- Placa distribuidora
+Para bancada, usar cabo USB de dados. Quando a USB-C estiver ocupada pelo
+conversor da bateria, definir como reconectar ao computador e evitar conectar
+duas fontes de 5 V sem conhecer o circuito de seleção de alimentação.
 
-Existe apenas uma pequena placa distribuidora para alimentação.
+## Áudio
 
-Ela distribui somente:
-3V3
-GND
-
-Nenhum sinal digital passa por ela, todos os sinais vão diretamente da Teensy ao dispositivo.
-
-## Modelos dos breakouts
-
-- 3x ICM-20948: Adafruit STEMMA QT, endereço padrão `0x69` e alternativo `0x68`.
-- 2x BMP390: Adafruit STEMMA QT.
-- Multiplexador: Adafruit PCA9548A STEMMA QT, endereço padrão `0x70`.
-- Microfone: Adafruit ICS43434.
-
-O firmware deve acessar cada sensor somente depois de selecionar seu canal no
-PCA9548A. O diagnóstico testa primeiro `0x69`, usado pelo hardware anterior, e
-depois `0x68`. Para confirmar que o dispositivo é um ICM-20948, o registrador
-`WHO_AM_I` deve retornar `0xEA`.
+Áudio permanece fora do build ESP32 de preparação. Não há pinagem I2S atribuída
+para a nova montagem. Histórico ICS43434 e roteiro de retomada em
+[ESP32_MIGRATION.md](ESP32_MIGRATION.md); não copiar os pinos 21/20/8 do Teensy.

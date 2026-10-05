@@ -1,5 +1,52 @@
 # Pet Analytics Firmware
 
+## Preparação ESP32-S3 — etapa atual
+
+Placa OEM ESP32-S3 Super Mini/ESP32-S3FH4R2: flash 4 MB, PSRAM Quad SPI 2 MB,
+USB nativa e PCA9548A mantido. Alimentação confirmada: bateria externa com
+conversor de 5 V conectado à USB-C. I2C GPIO1/2; SD SPI GPIO4/5/6/7.
+Mapa confirmado: ICM0/1/2 nos canais 4/5/6 e BMP0/1 nos canais 7/3.
+Detalhes elétricos em [HARDWARE_SPEC.md](docs/HARDWARE_SPEC.md).
+
+O ambiente padrão `esp32s3_supermini` usa `espressif32@7.1.3` e
+`greiman/SdFat@2.3.1`. Ele compila somente o programa de preparação em
+`src/bringup/esp32s3_setup.cpp`, com USB CDC, configuração QIO/Quad SPI e
+partições para 4 MB. Inicializa os pinos I2C/SPI e informa memória detectada.
+**Esse programa ainda não coleta sensores nem monta/grava o cartão SD.**
+Áudio, Wi-Fi/BLE e LED RGB não são ativados nessa etapa.
+
+Instalar dependências e compilar na raiz:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" pkg install -e esp32s3_supermini
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_supermini
+```
+
+Para testar na placa, depois de conferir alimentação/módulo SD, substituir COMx
+pela porta real (o primeiro upload pode exigir BOOT pressionado durante RESET):
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_supermini --target upload --upload-port COMx
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --port COMx --baud 115200
+```
+
+Esperado: `PBIC_STAGE=esp32s3_preparation`, `flash_bytes=4194304`,
+`psram_bytes=2097152`, `memory_config_ok=1`, `I2C_INIT ok=1` e `mounted=0`.
+Isso verifica configuração/memória e inicialização do controlador I2C, sem
+comprovar presença dos sensores ou comunicação com o cartão.
+
+O ambiente `teensy40` continua disponível explicitamente (`pio run -e teensy40`)
+para o firmware Teensy da main; a cópia completa da última etapa de apresentação
+está em [legacy/teensy40/SNAPSHOT.md](legacy/teensy40/SNAPSHOT.md).
+Decisões e próximos passos: [ESP32_MIGRATION.md](docs/ESP32_MIGRATION.md).
+
+## Aplicação Teensy da main — referência durante a migração
+
+As instruções abaixo descrevem a aplicação Teensy ainda não portada. Para
+compilá-la/carregá-la, selecionar explicitamente `-e teensy40`; `pio run`
+sem ambiente agora seleciona a preparação ESP32. As ferramentas de aquisição
+Python não recebem pacotes do programa de preparação.
+
 ## Visão Geral
 
 Este repositório contém o firmware do wearable **Pet Analytics**
@@ -26,7 +73,7 @@ a etapa de gravação no SD.
 
 ## Estado atual
 
-Os três ICM-20948 nos canais 0, 1 e 4 do PCA9548A são lidos a 100 Hz. O firmware
+Os três ICM-20948 nos canais 4, 5 e 6 do PCA9548A são lidos a 100 Hz. O firmware
 transmite pela USB pacotes binários de 79 bytes com timestamp, sequência, 27
 valores crus `int16` dos ICMs, quatro valores `uint32` crus dos BMP390 e CRC-8.
 O mesmo fluxo é gravado em `/Sxxx/imu.bin`; `meta.txt` preserva a configuração
