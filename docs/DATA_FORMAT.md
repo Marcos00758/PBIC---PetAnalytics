@@ -10,6 +10,60 @@ físico foi alinhada à montagem confirmada (ICMs 4/5/6 e BMPs 7/3).
 Capturas antigas devem ser interpretadas conforme seus metadados de sessão,
 sem atribuir retroativamente a elas a pinagem/canais da montagem atual.
 
+## Arquivos do diagnóstico ESP32 + SD (SDT1)
+
+O ambiente `esp32s3_sd_test` cria `/SDTEST/R000001/`, incrementando a pasta
+para cada execução. Não altera o pacote de sensores v4 nem cria áudio.
+
+| Arquivo | Conteúdo |
+|---|---|
+| `meta.txt` | Versão SDT1, CID, SdFat, setores, FAT/exFAT, CPU/memórias, pinos e parâmetros do ensaio |
+| `manifest.txt` | IDs contíguos desde 000, quatro bytes por entrada: três dígitos ASCII + LF; gravado antes dos arquivos do caso |
+| `cNNN.bin` | Fluxo determinístico; registros de 256 bytes, todos little-endian |
+| `cNNN.chk` | Checkpoints append-only de 32 bytes, little-endian; último registro válido delimita o prefixo confirmado |
+| `results.csv` | Configuração, bytes/tempo, latências, atrasos da cadência, sucesso e histogramas por operação |
+| `errors.txt` | Operação e códigos de erro SdFat, quando ainda for possível escrever; serial preserva o diagnóstico imediato |
+
+Registro de dados: magic `0x31544453` em 0..3 (`SDT1`), seed uint32 em 4..7
+(`0x50424943 XOR ID do caso`),
+sequência uint64 em 8..15 (começa em zero), padrão determinístico em 16..251,
+CRC32 IEEE refletido em 252..255 cobrindo os 252 bytes anteriores. Para cada
+posição `i` do payload, usar o byte inferior de
+`mix(seed XOR low32(sequence) XOR (high32(sequence)*0x9e3779b9) XOR (i*0x85ebca6b))`.
+Todas as operações usam uint32 com overflow modular. `mix(x)` aplica
+`x ^= x>>16; x *= 0x7feb352d; x ^= x>>15; x *= 0x846ca68b; x ^= x>>16`.
+CRC: polinômio refletido `0xedb88320`, valor inicial/final XOR `0xffffffff`.
+
+Checkpoint: magic `0x31434453` em 0..3 (`SDC1`), seed uint32 em 4..7,
+`durable_bytes` uint64 em 8..15, `planned_bytes` uint64 em 16..23,
+estado uint32 em 24..27 (`0` em andamento, `1` completo), CRC32 dos primeiros
+28 bytes em 28..31. Tamanhos confirmados e planejados são múltiplos de 256;
+estado completo exige igualdade. Seed/plano são constantes e o prefixo cresce
+monotonicamente; nenhum checkpoint deve seguir um checkpoint completo.
+
+Uma cauda de checkpoint rasgada/inválida encerra a leitura; o último checkpoint
+válido anterior ainda delimita dados recuperáveis de um caso incompleto, com
+aviso `checkpoint_tail`. Se nenhum checkpoint for válido, o caso falha.
+Arquivo completo exige tamanho exato e nenhum erro de checkpoint. Arquivo
+interrompido exige tamanho pelo menos igual ao prefixo confirmado; sobra de
+pré-alocação e cauda sem sync não são dados aprovados. Casos de interrupção
+18/20 exigem ainda checkpoint de pelo menos 65.536 bytes.
+
+`results.csv` inclui `case,mode,spi_mhz,block_bytes,operation,bytes,elapsed_us,
+calls,min_us,mean_us,max_us,late_slots,max_lateness_us,ok` e oito contagens de
+histograma: `<1`, `1–2`, `2–5`, `5–10`, `10–20`, `20–50`, `50–100`, `>=100 ms`.
+Velocidade efetiva é `bytes*1000000/elapsed_us`; tempos de escrita/leitura
+incluem geração/verificação e manutenção, enquanto latências por chamada
+isolam a operação SdFat. `sync` inclui a chamada final com truncamento;
+`checkpoint_sync` mede escrita e sync do checkpoint. `preallocate` inclui
+pré-alocação, posicionamento e sync. Linhas de manutenção têm `bytes=0`.
+`ok` avalia integridade/operação, não ausência de atrasos de cadência.
+
+Verificação independente: `python/verify_sd_test.py` recebe a pasta da execução
+copiada do cartão, confere manifesto, checkpoints, sequência, CRC e padrão e
+emite JSON/exit code. Não usar o parser de sensores para esses arquivos.
+Roteiro e identificação dos casos em [SD_TEST.md](SD_TEST.md).
+
 ## Pacote de sensores v4
 
 O firmware transmite pela USB um fluxo binario de tamanho fixo. Cada pacote

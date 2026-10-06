@@ -3,7 +3,7 @@
 ## Preparação ESP32-S3 em 2026-10-05
 
 O destino é a placa OEM ESP32-S3FH4R2. [HARDWARE_SPEC.md](HARDWARE_SPEC.md)
-consolida SDA/SCL GPIO1/2, SD SPI GPIO4/5/6/7, PCA9548A mantido e alimentação
+consolida SDA/SCL GPIO1/2, SD SPI (CS GPIO4, MOSI GPIO5, MISO GPIO6, SCK GPIO7), PCA9548A mantido e alimentação
 por conversor de 5 V na USB-C. ICM0/1/2 permanecem nos canais 4/5/6 e BMP0/1
 nos canais 7/3, conforme a montagem mais recente confirmada pelo usuário.
 
@@ -24,6 +24,38 @@ O snapshot em `legacy/teensy40/` não foi modificado. O registro de suspensão
 de áudio em ESP32_MIGRATION descreve também mudanças feitas na antiga branch
 presentation; elas não estavam integralmente na main após a troca de branch.
 A documentação distingue o perfil de preparação da aplicação Teensy existente.
+
+## Teste independente ESP32 + SD
+
+O ambiente explícito `esp32s3_sd_test` herda plataforma, memórias, USB e
+SdFat 2.3.1 do ambiente de preparação, mas compila somente
+`src/diagnostics/esp32s3_sd_test.cpp`. O ambiente padrão continua sendo a
+preparação sem escrita. As fontes de diagnóstico também são excluídas do
+build Teensy. Não há aquisição I2C, microfone, filtros ou tarefas de sensores
+no diagnóstico; a carga de 7.900 bytes/s é sintética e síncrona.
+
+`src/config/storage_config.h` centraliza os defaults de armazenamento (buffer
+8 KiB, bloco 512 bytes, SPI 12 MHz, reserva 4 MiB). `constants.h` mantém seus
+nomes públicos como aliases, preservando o comportamento Teensy. A preparação
+informa a frequência compartilhada; o teste compara também 4/20 MHz e
+1.024/4.096 bytes. O SD usa `SdFs`/`FsFile` e `SPI` explícito com os GPIOs
+confirmados. `DEDICATED_SPI` pressupõe que nenhum outro dispositivo usa esse SPI.
+
+O gerador/formato portátil fica em `sd_test_format.h`. Dados, manifesto,
+checkpoints e métricas ficam em `/SDTEST/Rxxxxxx/`, com criação exclusiva e
+sem sobrescrever sessões. Checkpoints são gravados somente após `data.sync()`;
+o verificador confirma o prefixo durável, ignorando a cauda não confirmada em
+ensaios interrompidos. NVS (`Preferences`, namespace `pbic-sdtest`) guarda a
+pasta, CID do cartão e fase para recuperação após reset; arquivos no SD
+continuam sendo a evidência verificável independentemente com Python.
+
+Há dois reinícios automáticos (arquivo aberto sem sync final e arquivo fechado)
+e uma etapa opcional de corte manual de energia. Reset por software não
+reproduz todos os efeitos de uma queda de alimentação. A comparação de blocos
+e clocks não define automaticamente a configuração final: integridade,
+cadência e maiores latências precisam ser avaliadas juntas. Concorrência com
+aquisição em outro núcleo permanece uma etapa futura. Roteiro em
+[SD_TEST.md](SD_TEST.md), formato em [DATA_FORMAT.md](DATA_FORMAT.md).
 
 ## Aplicação Teensy ainda não portada
 

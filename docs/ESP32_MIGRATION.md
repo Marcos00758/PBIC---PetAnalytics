@@ -8,14 +8,15 @@ separada. A aquisição e o logger ainda precisam ser portados para esse ambient
 ## Hardware e PlatformIO confirmados
 
 - I2C do PCA9548A: SDA GPIO1, SCL GPIO2, 400 kHz.
-- SD SPI: SCK GPIO4, MISO GPIO5, MOSI GPIO6, CS GPIO7.
+- SD SPI: SCK GPIO7, MISO GPIO6, MOSI GPIO5, CS GPIO4.
 - PCA9548A mantido: ICM0/1/2 nos canais 4/5/6; BMP0/1 nos canais 7/3.
   O mapa antigo da `main` foi corrigido em `constants.h` após confirmação.
 - Alimentação: bateria externa com conversor regulado de 5 V na USB-C.
   O SD será alimentado pelo ESP32. Módulo informado: "Modulo Adaptador Cartão
   Micro Sd Tf Card Arduino Esp32 Pic", anúncio MLBU2296492711/MLB3617781629,
   registrado em HARDWARE_SPEC.md. A consulta ao anúncio foi bloqueada (403);
-  circuito/revisão física e tensão de VCC continuam pendentes de confirmação.
+  circuito/revisão física permanecem sem esquema. O usuário confirmou depois
+  VCC em 3,3 V e conexões concluídas; SD ligado ao 3V3 do ESP32.
 - GPIO19/20 reservados para USB. GPIO48 reservado ao WS2812, sem driver LED ativo.
 - Perfil `esp32-s3-devkitc-1` com overrides explícitos: flash 4 MB,
   partições `default.csv` de 4 MB, flash QIO a 80 MHz, PSRAM Quad SPI
@@ -44,7 +45,9 @@ Espera-se `flash_bytes=4194304`, `psram_bytes=2097152` e `memory_config_ok=1`.
 Ainda não monta ou escreve no SD, não acessa os cinco sensores, não coleta áudio
 e não inicia Wi-Fi/BLE. A pausa de 1 ms no loop de preparação cede CPU;
 não é um agendador de aquisição. Não confundir esse programa com o futuro
-teste de robustez do SD ou com o firmware final de coleta.
+teste de robustez do SD ou com o firmware final de coleta. O teste independente
+agora existe no ambiente explícito `esp32s3_sd_test`; instruções e limites em
+[SD_TEST.md](SD_TEST.md). Ele não substitui a preparação como ambiente padrão.
 
 O anúncio OEM informado não abriu pela ferramenta de pesquisa. Recursos de
 carga/BOOST e layout vêm da descrição fornecida e aguardam validação elétrica.
@@ -56,7 +59,7 @@ carga/BOOST e layout vêm da descrição fornecida e aguardam validação elétr
 | Framework | Arduino-ESP32, fornecido pela plataforma `espressif32` do PlatformIO | Preserva a organização Arduino/C++ dos drivers. Fixar plataforma e pacotes, sem URLs `master`. |
 | I2C | `Wire` do Arduino-ESP32 | Já vem com o framework. Inicializar SDA/SCL explicitamente e conferir timeout/recuperação do barramento. |
 | SPI | `SPI` do Arduino-ESP32 | Já vem com o framework. Inicializar SCK/MISO/MOSI/CS conforme a futura pinagem. |
-| SD | **SdFat 2.3.1**, dependência externa explícita, candidata ao teste de SD | Oferece FAT16/FAT32/exFAT, `FsFile`, pré-alocação, `sync()` e `truncate()`. Confirmar compilação e integridade no S3 antes de integrar ao logger. |
+| SD | **SdFat 2.3.1**, dependência externa explícita usada em `esp32s3_sd_test` | Oferece FAT16/FAT32/exFAT, `FsFile`, pré-alocação, `sync()` e `truncate()`. Build S3 aprovado; integridade na placa precisa ser validada antes da integração ao logger. |
 | ICM-20948 | Manter `Adafruit ICM20X@2.0.7` | Declara `architectures=*`; driver atual usa `TwoWire`. Portabilidade declarada não substitui o teste dos três ICMs/AK09916. |
 | BMP390 | Manter `Adafruit BMP3XX Library@2.1.6` | Declara `architectures=*`; preservar leitura crua e NVM individual. Não usar API de altitude para transformar o arquivo bruto. |
 | Dependências Adafruit | Manter `Adafruit BusIO@1.17.4` e `Adafruit Unified Sensor@1.1.15` | Já utilizadas pelos drivers dos sensores, com suporte genérico declarado. |
@@ -186,10 +189,10 @@ e os detalhes de pré-alocação exFAT da versão SdFat escolhida.
 ## Próximas validações
 
 Pinagem externa, canais, alimentação por conversor e USB foram definidos.
-Confirmar circuito e VCC do módulo SD já identificado comercialmente, cartão
-utilizado, corrente do conversor/regulador e detalhes do
-esquema OEM. Validar flash/PSRAM/USB na placa, depois testar SdFat de
-forma isolada. Portar os cinco sensores, conferir a compensação dos BMP390 com
+VCC do módulo SD foi confirmado em 3,3 V e a montagem está concluída. Registrar
+cartão utilizado, corrente do conversor/regulador e detalhes do esquema OEM.
+Validar flash/PSRAM/USB e executar o novo `esp32s3_sd_test` na placa para
+avaliar SdFat isoladamente. Portar os cinco sensores, conferir a compensação dos BMP390 com
 dados crus/NVM, restaurar gravação SD e testar tarefas/fila sob carga prolongada.
 Sem filtros de sensores ou pós-processamento na nova coleta, conforme pedido.
 

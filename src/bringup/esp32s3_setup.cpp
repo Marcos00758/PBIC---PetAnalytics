@@ -4,6 +4,7 @@
 #include <Wire.h>
 
 #include "config/pins.h"
+#include "config/storage_config.h"
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S3)
 #error "This preparation entry point requires ESP32-S3"
@@ -35,9 +36,10 @@ void reportConfiguration() {
                 i2cReady ? 1U : 0U, pet::pins::kI2cSda, pet::pins::kI2cScl,
                 static_cast<unsigned long>(kI2cClockHz));
   Serial.printf("SD_PREPARED library=SdFat type=SdFs type_bytes=%u "
-                "sck=%u miso=%u mosi=%u cs=%u mounted=0\n",
+                "sck=%u miso=%u mosi=%u cs=%u spi_mhz=%u mounted=0\n",
                 static_cast<unsigned>(sizeof(SdFs)), pet::pins::kSdSck,
-                pet::pins::kSdMiso, pet::pins::kSdMosi, pet::pins::kSdChipSelect);
+                pet::pins::kSdMiso, pet::pins::kSdMosi, pet::pins::kSdChipSelect,
+                pet::storage::kSpiClockMHz);
   Serial.println("ACQUISITION_ENABLED=0 AUDIO_ENABLED=0 SD_WRITES_ENABLED=0");
 }
 

@@ -9,10 +9,10 @@ namespace pet::pins {
 // OEM ESP32-S3 Super Mini / FH4R2. GPIO19/20 remain reserved for native USB.
 constexpr uint8_t kI2cSda = 1;
 constexpr uint8_t kI2cScl = 2;
-constexpr uint8_t kSdSck = 4;
-constexpr uint8_t kSdMiso = 5;
-constexpr uint8_t kSdMosi = 6;
-constexpr uint8_t kSdChipSelect = 7;
+constexpr uint8_t kSdSck = 7;
+constexpr uint8_t kSdMiso = 6;
+constexpr uint8_t kSdMosi = 5;
+constexpr uint8_t kSdChipSelect = 4;
 constexpr uint8_t kRgbLedData = 48;
 
 // No microphone pin assignment in the ESP32 stage: audio is suspended.

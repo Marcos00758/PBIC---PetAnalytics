@@ -29,10 +29,10 @@ Os números abaixo são **GPIOs do ESP32**, não posições físicas no conector
 |---|---|---:|
 | I2C → PCA9548A | SDA | 1 |
 | I2C → PCA9548A | SCL | 2 |
-| SPI → microSD | SCK | 4 |
-| SPI → microSD | MISO | 5 |
-| SPI → microSD | MOSI | 6 |
-| SPI → microSD | CS | 7 |
+| SPI → microSD | SCK | 7 |
+| SPI → microSD | MISO | 6 |
+| SPI → microSD | MOSI | 5 |
+| SPI → microSD | CS | 4 |
 
 PCA9548A e sensores continuam na distribuição de 3V3/GND, com terra comum
 com ESP32 e SD. I2C configurado para 400 kHz. O CS do cartão é colocado em
@@ -69,7 +69,7 @@ Bateria de lítio → conversor regulado para 5 V → USB-C do ESP32
                                                 ↓ regulador da placa
                                               3V3/GND
                                                 ↓
-                                       PCA9548A e sensores
+                                       PCA9548A, sensores e módulo SD
 ```
 
 O microSD será alimentado pelo próprio ESP32, conforme informado. Módulo
@@ -79,16 +79,13 @@ Arduino Esp32 Pic"**, no
 
 A consulta ao anúncio retornou **403 Forbidden** em 2026-10-05. O nome é uma
 denominação comercial genérica, sem identificação confirmada do fabricante,
-revisão da placa, regulador ou conversor de nível. **A tensão de entrada VCC
-do módulo continua pendente**; não inferir 3,3 V ou 5 V apenas por constar
-"Arduino/ESP32" no título.
-
-O cartão em si usa 3,3 V; a entrada do adaptador depende de seu circuito.
-Confirmar a tensão na descrição técnica ou identificar o circuito por fotos
-nítidas da frente/verso e marcações dos componentes antes de ligar VCC.
-Depois, medir a alimentação do cartão durante escrita e verificar se a saída
-escolhida da placa suporta seus picos junto aos sensores. Todos os sinais para
-o ESP32 devem ser 3,3 V. A pinagem SPI GPIO4/5/6/7 permanece confirmada.
+revisão da placa, regulador ou conversor de nível. Posteriormente, o usuário
+**confirmou VCC do módulo em 3,3 V, alimentado pela saída 3V3 do ESP32**, e
+informou que as conexões de hardware estão concluídas. A pinagem SPI
+CS GPIO4, MOSI GPIO5, MISO GPIO6 e SCK GPIO7 permanece confirmada, com terra comum. A tensão deixou de ser
+uma dúvida de montagem; estabilidade durante escrita e picos de corrente
+ainda dependem do ensaio físico. O ambiente `esp32s3_sd_test` usa essa montagem,
+sem acionar sensores, áudio ou o LED RGB; roteiro em [SD_TEST.md](SD_TEST.md).
 
 A célula não será ligada diretamente à USB-C. Pads BATTERY+/BATTERY− não
 fazem parte do caminho confirmado de alimentação; não presumir que o carregador

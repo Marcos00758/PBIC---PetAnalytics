@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "storage_config.h"
 
 namespace pet::config {
 
@@ -20,12 +21,12 @@ constexpr uint32_t kI2cClockHz = 400000;
 
 constexpr char kFirmwareVersion[] = "0.5.1";
 
-constexpr size_t kSdRamBufferBytes = 8192;
+constexpr size_t kSdRamBufferBytes = storage::kBufferBytes;
 constexpr size_t kSdAudioRamBufferBytes = 32768;
-constexpr size_t kSdImuWriteBlockBytes = 512;
+constexpr size_t kSdImuWriteBlockBytes = storage::kWriteBlockBytes;
 constexpr size_t kSdAudioWriteBlockBytes = 512;
-constexpr uint8_t kSdSpiClockMHz = 12;
-constexpr uint64_t kSdFreeSpaceReserveBytes = 4ULL * 1024ULL * 1024ULL;
+constexpr uint8_t kSdSpiClockMHz = storage::kSpiClockMHz;
+constexpr uint64_t kSdFreeSpaceReserveBytes = storage::kFreeReserveBytes;
 constexpr uint32_t kSdMinimumRecordingSeconds = 60;
 constexpr bool kSdContinuousSessionEnabled = true;
 constexpr uint32_t kSdPreallocationSeconds = 10U * 60U;
