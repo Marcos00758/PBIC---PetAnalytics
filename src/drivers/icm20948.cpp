@@ -15,7 +15,11 @@ constexpr uint8_t kAk09916Address = 0x0C;
 constexpr uint8_t kAk09916WhoAmIRegister = 0x01;
 constexpr uint8_t kAk09916ExpectedWhoAmI = 0x09;
 constexpr uint8_t kBank0 = 0x00;
+constexpr uint8_t kBank2 = 0x20;
 constexpr uint8_t kBank3 = 0x30;
+static_assert(config::kIcmAccelRangeG == 8 && config::kIcmGyroRangeDps == 2000 &&
+                  config::kMagSampleRateHz == 20,
+              "ICM range/rate constants must match the configured library enums");
 constexpr uint8_t kI2cMasterStatusRegister = 0x17;
 constexpr uint8_t kI2cSlave4AddressRegister = 0x13;
 constexpr uint8_t kI2cSlave4RegisterRegister = 0x14;
@@ -59,6 +63,7 @@ Icm20948::Icm20948(Pca9548a& mux, TwoWire& wire, uint8_t muxChannel,
 bool Icm20948::begin() {
   initialized_ = false;
   magnetometerWhoAmI_ = 0;
+  accelConfig_ = gyroConfig_ = magnetometerMode_ = 0;
 
   if (!detectAddress() || !mux_.selectChannel(muxChannel_)) {
     return false;
@@ -257,16 +262,27 @@ bool Icm20948::configure() {
   sensor_.setAccelRateDivisor(config::kIcmAccelRateDivisor);
   sensor_.setGyroRateDivisor(config::kIcmGyroRateDivisor);
 
-  const bool accelFilterDisabled =
-      sensor_.enableAccelDLPF(false, ICM20X_ACCEL_FREQ_50_4_HZ);
-  const bool gyroFilterDisabled =
-      sensor_.enableGyrolDLPF(false, ICM20X_GYRO_FREQ_51_2_HZ);
-  const bool magnetometerConfigured =
-      sensor_.setMagDataRate(AK09916_MAG_DATARATE_20_HZ);
+  if (!sensor_.setMagDataRate(AK09916_MAG_DATARATE_20_HZ)) {
+    return false;
+  }
 
-  return accelFilterDisabled && gyroFilterDisabled && magnetometerConfigured &&
-         sensor_.getAccelRange() == ICM20948_ACCEL_RANGE_8_G &&
-         sensor_.getGyroRange() == ICM20948_GYRO_RANGE_2000_DPS &&
+  // Adafruit 2.0.7 enableGyrolDLPF targets ACCEL_CONFIG by mistake.
+  // Write the correct bank-2 registers: range in bits 2:1, FCHOICE=0.
+  constexpr uint8_t accelConfig = ICM20948_ACCEL_RANGE_8_G << 1;
+  constexpr uint8_t gyroConfig = ICM20948_GYRO_RANGE_2000_DPS << 1;
+  const bool registersVerified =
+      writeRegister(address_, config::kIcmRegisterBankSelect, kBank2) &&
+      writeRegister(address_, ICM20X_B2_ACCEL_CONFIG_1, accelConfig) &&
+      writeRegister(address_, ICM20X_B2_GYRO_CONFIG_1, gyroConfig) &&
+      readRegister(address_, ICM20X_B2_ACCEL_CONFIG_1, accelConfig_) &&
+      readRegister(address_, ICM20X_B2_GYRO_CONFIG_1, gyroConfig_) &&
+      accelConfig_ == accelConfig && gyroConfig_ == gyroConfig;
+  const bool bankRestored =
+      writeRegister(address_, config::kIcmRegisterBankSelect, kBank0);
+
+  return registersVerified && bankRestored &&
+         readAuxiliaryRegister(kAk09916Address, AK09916_CNTL2, magnetometerMode_) &&
+         magnetometerMode_ == AK09916_MAG_DATARATE_20_HZ &&
          sensor_.getAccelRateDivisor() == config::kIcmAccelRateDivisor &&
          sensor_.getGyroRateDivisor() == config::kIcmGyroRateDivisor;
 }

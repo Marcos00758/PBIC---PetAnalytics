@@ -1,11 +1,15 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <SD.h>
+// FS.h owns the generic File alias; this diagnostic always uses FsFile/O_*.
+#define DISABLE_FS_H_WARNING
 #include <SdFat.h>
 #include <Preferences.h>
 #include <esp_timer.h>
 #include "config/pins.h"
 #include "config/storage_config.h"
 #include "sd_test_format.h"
+#include "utils/esp32_reset_reason.h"
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S3)
 #error "The independent SD diagnostic requires ESP32-S3"
@@ -18,8 +22,15 @@ constexpr size_t kBlocks[] = {pet::storage::kWriteBlockBytes, 1024, 4096};
 constexpr uint64_t kMaximumBytes = 8ULL * 1024 * 1024;
 constexpr uint64_t kPacedBytes = ((7900ULL * 30 + 255) / 256) * 256;
 constexpr uint32_t kSyncBytes = 64 * 1024;
+constexpr uint32_t kReferenceSpiHz = 4000000;
+constexpr uint8_t kSpiOptions = SHARED_SPI | USER_SPI_BEGIN;
 constexpr uint32_t kLatencyBounds[] = {1000, 2000, 5000, 10000, 20000,
                                      50000, 100000};
+SPIClass sdFspi(FSPI);
+SPIClass sdHspi(HSPI);
+uint8_t selectedBus = FSPI;
+SPIClass& activeSpi() { return selectedBus == HSPI ? sdHspi : sdFspi; }
+const char* spiBusName() { return selectedBus == HSPI ? "HSPI" : "FSPI"; }
 SdFs sd;
 Preferences prefs;
 FsFile dirtyData;  // Remains open during intentional reset/power interruption.
@@ -34,6 +45,7 @@ size_t activeBlock = 0;
 bool armed = false;
 bool available = false;
 bool suiteOk = true;
+const char* bootPath = "SdFat_direct";
 
 uint64_t nowUs() { return esp_timer_get_time(); }
 struct Stats {
@@ -54,29 +66,78 @@ void path(char* out, unsigned id, const char* extension) {
 bool failure(const char* where) {
   suiteOk = false;
   const uint8_t code = sd.sdErrorCode(), detail = sd.sdErrorData();
-  Serial.printf("SD_ERROR case=%u spi_mhz=%u block=%u operation=%s code=%u data=%u\n",
-                activeCase, currentMHz, unsigned(activeBlock), where, code, detail);
+  Serial.printf("SD_ERROR case=%u spi_bus=%s spi_mhz=%u block=%u operation=%s code=%u data=%u\n",
+                activeCase, spiBusName(), currentMHz, unsigned(activeBlock), where, code, detail);
   // A failed transport may also prevent saving this error on the card.
   char name[80]; snprintf(name, sizeof(name), "%s/errors.txt", runPath);
   FsFile f;
   if (runPath[0] && f.open(name, O_WRONLY | O_CREAT | O_APPEND)) {
-    f.printf("case=%u spi_mhz=%u block=%u operation=%s code=%u data=%u\n",
-             activeCase, currentMHz, unsigned(activeBlock), where, code, detail);
+    f.printf("case=%u spi_bus=%s spi_mhz=%u block=%u operation=%s code=%u data=%u\n",
+             activeCase, spiBusName(), currentMHz, unsigned(activeBlock), where, code, detail);
     f.close();
   }
   return false;
 }
-bool mount(uint8_t mhz) {
-  sd.end();
-  SPI.end();
+void beginSpi(SPIClass& spi) {
+  spi.end();
   pinMode(pet::pins::kSdChipSelect, OUTPUT);
   digitalWrite(pet::pins::kSdChipSelect, HIGH);
-  SPI.begin(pet::pins::kSdSck, pet::pins::kSdMiso, pet::pins::kSdMosi,
+  spi.begin(pet::pins::kSdSck, pet::pins::kSdMiso, pet::pins::kSdMosi,
             pet::pins::kSdChipSelect);
+}
+bool mount(uint8_t mhz) {
+  sd.end();
+  beginSpi(activeSpi());
   currentMHz = mhz;
-  // SD is the only user of this SPI bus; custom pins require the explicit SPI.
-  return sd.begin(SdSpiConfig(pet::pins::kSdChipSelect, DEDICATED_SPI,
-                             uint32_t(mhz) * 1000000, &SPI));
+  // Like SDCard::init(SPIClass&), consume the bus already configured by us.
+  // USER_SPI_BEGIN prevents SdFat from calling begin() again without pins.
+  return sd.begin(SdSpiConfig(pet::pins::kSdChipSelect, kSpiOptions,
+                             uint32_t(mhz) * 1000000, &activeSpi()));
+}
+void probeReference() {
+  sd.end();
+  beginSpi(activeSpi());
+  // Reproduce SDCard.cpp's SD.begin(cs, spi), with its 4 MHz default explicit.
+  // Formatting is disabled; no test files are opened or written through SD.h.
+  const bool mounted = SD.begin(pet::pins::kSdChipSelect, activeSpi(),
+                               kReferenceSpiHz, "/sd-reference", 5, false);
+  Serial.printf("SD_REFERENCE library=Arduino_SD mounted=%u spi_bus=%s spi_hz=%lu "
+                "sck=%u miso=%u mosi=%u cs=%u card_type=%u card_bytes=%llu\n",
+                mounted, spiBusName(), static_cast<unsigned long>(kReferenceSpiHz),
+                pet::pins::kSdSck, pet::pins::kSdMiso, pet::pins::kSdMosi,
+                pet::pins::kSdChipSelect, mounted ? unsigned(SD.cardType()) : 0,
+                mounted ? SD.cardSize() : 0ULL);
+  SD.end();  // The two filesystem drivers must never own the card together.
+  activeSpi().end();
+  digitalWrite(pet::pins::kSdChipSelect, HIGH);
+}
+bool mountAtBoot() {
+  // Prefer the controller recorded for the last run, including recovery boots.
+  const uint8_t preferred = prefs.getUChar("bus", FSPI) == HSPI ? HSPI : FSPI;
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {
+    sd.end();
+    activeSpi().end();
+    selectedBus = attempt == 0 ? preferred : (preferred == FSPI ? HSPI : FSPI);
+    Serial.printf("SD_BUS_SELECT spi_bus=%s attempt=%u sck=%u miso=%u mosi=%u cs=%u\n",
+                  spiBusName(), attempt + 1, pet::pins::kSdSck, pet::pins::kSdMiso,
+                  pet::pins::kSdMosi, pet::pins::kSdChipSelect);
+    if (mount(pet::storage::kSpiClockMHz)) return true;
+    failure("boot_mount");
+    probeReference();
+    // SD.h may have initialized SPI even if its filesystem mount failed.
+    Serial.printf("SD_INIT_RETRY library=SdFat spi_bus=%s spi_mode=SHARED_SPI user_spi_begin=1\n",
+                  spiBusName());
+    if (mount(pet::storage::kSpiClockMHz)) {
+      bootPath = "SdFat_after_Arduino_SD";
+      return true;
+    }
+    failure("boot_mount_after_reference");
+  }
+  sd.end();
+  activeSpi().end();
+  digitalWrite(pet::pins::kSdChipSelect, HIGH);
+  Serial.println("SD_INIT_FAILED tested_controllers=FSPI,HSPI acquisition_started=0");
+  return false;
 }
 bool identity() {
   cid_t cid; csd_t csd;
@@ -85,10 +146,10 @@ bool identity() {
   const uint8_t* raw = reinterpret_cast<const uint8_t*>(&cid);
   for (unsigned i = 0; i < 16; ++i) sprintf(cardId + 2 * i, "%02x", raw[i]);
   Serial.printf("SD_CARD cid=%s mid=%u product=%.5s serial=%lu sectors=%lu "
-                "fat=%u spi_mhz=%u sdfat=%s\n", cardId, cid.mid, cid.pnm,
+                "fat=%u spi_mhz=%u sdfat=%s spi_bus=%s\n", cardId, cid.mid, cid.pnm,
                 static_cast<unsigned long>(cid.psn()),
                 static_cast<unsigned long>(sd.card()->sectorCount()),
-                sd.fatType(), currentMHz, SD_FAT_VERSION_STR);
+                sd.fatType(), currentMHz, SD_FAT_VERSION_STR, spiBusName());
   return true;
 }
 bool report(unsigned id, const char* mode, size_t block, const char* operation,
@@ -303,22 +364,23 @@ bool newRun() {
   char name[80]; snprintf(name, sizeof(name), "%s/meta.txt", runPath);
   FsFile f;
   if (!f.open(name, O_WRONLY | O_CREAT | O_EXCL)) return failure("metadata_open");
-  f.printf("format=SDT1\ntest_version=1\ncid=%s\nsdfat=%s\nsectors=%lu\nfat=%u\n"
+  f.printf("format=SDT1\ntest_version=3\ncid=%s\nsdfat=%s\nsectors=%lu\nfat=%u\n"
            "cpu_mhz=%u\nflash_bytes=%lu\npsram_bytes=%lu\n"
-           "sck=7\nmiso=6\nmosi=5\ncs=4\nvcc=3.3V\nspi_mode=DEDICATED_SPI\n"
+           "sck=7\nmiso=6\nmosi=5\ncs=4\nvcc=3.3V\nspi_mode=SHARED_SPI\n"
+           "spi_bus=%s\nspi_begin=USER_SPI_BEGIN\nboot_path=%s\nreference_spi_hz=4000000\n"
            "clocks_mhz=4,12,20\nblocks_bytes=512,1024,4096\n"
            "paced_target_Bps=7900\npaced_packet_bytes=79\npaced_period_us=10000\n"
            "maximum_bytes=%llu\npaced_bytes=%llu\n",
            cardId, SD_FAT_VERSION_STR, static_cast<unsigned long>(sd.card()->sectorCount()),
            sd.fatType(), ESP.getCpuFreqMHz(), static_cast<unsigned long>(ESP.getFlashChipSize()),
-           static_cast<unsigned long>(ESP.getPsramSize()), kMaximumBytes, kPacedBytes);
+           static_cast<unsigned long>(ESP.getPsramSize()), spiBusName(), bootPath, kMaximumBytes, kPacedBytes);
   if (f.getWriteError() || !f.close()) return failure("metadata_write");
   snprintf(name, sizeof(name), "%s/results.csv", runPath);
   if (!f.open(name, O_WRONLY | O_CREAT | O_EXCL)) return failure("results_create");
   f.println("case,mode,spi_mhz,block_bytes,operation,bytes,elapsed_us,calls,min_us,mean_us,max_us,late_slots,max_lateness_us,ok,lt1ms,1to2ms,2to5ms,5to10ms,10to20ms,20to50ms,50to100ms,ge100ms");
   if (f.getWriteError() || !f.close()) return failure("results_header");
   if (!prefs.putString("path", runPath) || !prefs.putString("cid", cardId) ||
-      !prefs.putUChar("phase", 0)) return failure("nvs_new_run");
+      !prefs.putUChar("bus", selectedBus) || !prefs.putUChar("phase", 0)) return failure("nvs_new_run");
   return true;
 }
 bool setPhase(uint8_t phase) {
@@ -393,7 +455,7 @@ void suite() {
   interruption(18, 1);
 }
 void help() {
-  Serial.println("SD_TEST v1: s=new suite; v=verify latest run; p=manual power-cut case (after suite)");
+  Serial.println("SD_TEST v3: s=new suite; v=verify latest run; p=manual power-cut case (after suite)");
   Serial.println("No audio/sensors. New files only in /SDTEST. Software resets reconnect USB.");
 }
 }  // namespace
@@ -402,8 +464,11 @@ void setup() {
   Serial.begin(115200);
   const uint32_t start = millis();
   while (!Serial && millis() - start < 3000) delay(10);
+  Serial.printf("SD_BOOT reset_reason=%d reset=%s\n", int(esp_reset_reason()),
+                pet::utils::resetReasonName(esp_reset_reason()));
   if (!prefs.begin("pbic-sdtest", false)) { Serial.println("SD_ERROR NVS unavailable"); return; }
-  if (!mount(pet::storage::kSpiClockMHz) || !identity()) { failure("boot_mount"); return; }
+  if (!mountAtBoot()) return;
+  if (!identity()) return;
   available = true;
   const String previous = prefs.getString("path", "");
   if (previous.length()) {
@@ -413,6 +478,13 @@ void setup() {
     previous.toCharArray(runPath, sizeof(runPath));
     if (prefs.getString("cid", "") != cardId) {
       Serial.println("SD_CARD_CHANGED: previous evidence is on another card; use s for a new run");
+      runPath[0] = 0; help(); return;
+    }
+    if (prefs.getUChar("bus", FSPI) != selectedBus) {
+      Serial.printf("SD_RECOVERY_BUS_CHANGED spi_bus=%s saved_bus=%u "
+                    "automatic_recovery=0; use s for a new run or verify old files in Python\n",
+                    spiBusName(), prefs.getUChar("bus", FSPI));
+      // Keep old reset intent/evidence, without mixing controllers in its CSV.
       runPath[0] = 0; help(); return;
     }
     suiteOk = prefs.getBool("ok", true);

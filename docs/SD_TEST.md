@@ -12,8 +12,8 @@ Substituir COMx pela porta da placa. O primeiro upload pode exigir BOOT/RESET.
 
 ```powershell
 & "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_sd_test
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_sd_test --target upload --upload-port COMx
-& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --port COMx --baud 115200
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_sd_test --target upload --upload-port COM11
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --port COM11 --baud 115200
 ```
 
 No monitor, usar os caracteres abaixo (não é necessário Enter):
@@ -147,6 +147,48 @@ Exigem `g++` no PATH para gerar fixtures com o header C++ real; se ausente,
 esse grupo é marcado como skipped. Há testes de CRC/padrão, sequência trocada,
 truncamento, manifesto, arquivos ausentes, checkpoint inválido/regressivo e
 cauda interrompida. Compilação/testes de host não substituem o ensaio na placa.
+
+## Resultado físico informado em 2026-10-10
+
+O usuário substituiu ESP32 e módulo SD juntos, mantendo FH4R2 e pinagem.
+COM11 identifica `MSD08`, CID `8947484d5344303810b1a5fab600e40f`,
+15.630.336 setores, FAT32, FSPI e SdFat 2.3.1. Montagem a 12 MHz e pré-alocação
+de 2 MiB a 4 MHz funcionaram. Duas peças trocadas não isolam a causa anterior.
+
+Na execução `/SDTEST/R000003`, caso 0, blocos de 512 bytes a 4 MHz:
+
+- Pré-alocação: 55.617 us, `ok=1`.
+- Escrita: 689.152 bytes reportados em 6.365.021 us; maior chamada 602.162 us;
+  `data_write code=36 data=229`, `case_finalize code=36 data=0`, `ok=0`.
+- Checkpoint: 655.360 bytes confirmados; tamanho físico 2.097.152 bytes,
+  `complete=0`. Verificação imediata falhou após 45.056 bytes; abrir resultados
+  também falhou (`results_open code=30 data=255`). A suíte foi abortada.
+- Após reconexão/reinicialização, o mesmo prefixo foi verificado a 12 MHz:
+  655.360 bytes íntegros, leitura em 1.607.749 us, maior chamada 10.023 us.
+  `SD_RUN_VERIFY cases=1 ok=1` confirma o prefixo, não a matriz completa.
+- R000002/R000004 mostram só início/pré-alocação, sem conclusão demonstrada.
+
+Na enumeração SdFat 2.3.1, 36 é `WRITE_PROGRAMMING`: timeout aguardando o
+cartão voltar a pronto depois de escrever um setor. `SD_WRITE_TIMEOUT=600 ms`
+é coerente com a chamada de 602 ms. 229 (`0xe5`) é o último byte observado,
+não um diagnóstico separado de CRC. 30 é `READ_TIMEOUT`, limite de 300 ms.
+Fontes: [SdCardInfo.h](https://github.com/greiman/SdFat/blob/2.3.1/src/SdCard/SdCardInfo.h)
+e [SdSpiCard.cpp](https://github.com/greiman/SdFat/blob/2.3.1/src/SdCard/SdSpiCard/SdSpiCard.cpp).
+
+Há funcionamento parcial e recuperação após falha de transporte; não prova
+corrupção permanente do prefixo nem distingue pausa real do cartão de SPI
+instável. Não aumentar timeouts ou aprovar clocks sem novos ensaios. O teste
+nem chegou à carga de 7.900 bytes/s. Preservar pastas, resultados, erros e log;
+conferir R000003 também com `python/verify_sd_test.py` no computador.
+
+Desconexões durante caso 0 não correspondem aos resets programados depois da
+matriz. O log não identifica sua causa. Agora cada boot imprime
+`SD_BOOT reset_reason=<n> reset=<nome>`, distinguindo power-on, software,
+panic, watchdog e brownout; uma perda exclusiva do USB pode não gerar boot.
+Não muda SDT1, checkpoints, matriz ou timeouts.
+
+**Conclusão:** suíte e armazenamento longo ainda não aprovados. A migração
+continua em compilação e bancada, mantendo a falha visível.
 
 ## Validação desta implementação — 2026-10-05
 

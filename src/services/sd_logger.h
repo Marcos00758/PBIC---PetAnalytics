@@ -1,19 +1,33 @@
 #pragma once
 
 #include <Arduino.h>
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include <SPI.h>
+// FsFile is explicit; Arduino FS.h's File alias is intentionally unused.
+#ifndef DISABLE_FS_H_WARNING
+#define DISABLE_FS_H_WARNING
+#endif
+#include <SdFat.h>
+#else
 #include <SD.h>
+#endif
 
 #include "config/constants.h"
 #include "data/imu_packet.h"
 #include "data/sd_journal.h"
 #include "drivers/bmp390.h"
-#include "services/audio_capture.h"
+#include "data/audio_types.h"
 #include "services/imu_acquisition.h"
 
 namespace pet::services {
 
 struct SdSessionMetadata {
   bool icmReady[data::kIcmCount] = {false, false, false};
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  uint8_t icmAccelConfig[data::kIcmCount]{};
+  uint8_t icmGyroConfig[data::kIcmCount]{};
+  uint8_t icmMagMode[data::kIcmCount]{};
+#endif
   bool bmpReady[data::kBmpCount] = {false, false};
   bool bmpNvmValid[data::kBmpCount] = {false, false};
   uint8_t bmpAddress[data::kBmpCount] = {0, 0};
@@ -82,6 +96,7 @@ class SdLogger {
       const AcquisitionCounters& acquisitionCounters,
       const AudioCaptureCounters& audioCounters);
   bool enqueue(const data::ImuPacket& packet);
+  bool canEnqueuePacket() const;
   bool enqueueAudio(const AudioPcmBlock& block);
   bool canEnqueueAudioBlock() const;
   void service(const AcquisitionCounters& acquisitionCounters,
@@ -101,6 +116,13 @@ class SdLogger {
   const SdLoggerCounters& counters() const { return counters_; }
 
  private:
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  SdFs& filesystem() { return filesystem_; }
+  SdFs filesystem_;
+  SPIClass spi_{FSPI};
+#else
+  SdFs& filesystem() { return SD.sdfs; }
+#endif
   enum class SchedulerChoice : uint8_t {
     kNone,
     kImuOnlyReady,
@@ -159,7 +181,12 @@ class SdLogger {
   FsFile audioFile_;
   FsFile journalFile_;
   uint8_t buffer_[config::kSdRamBufferBytes]{};
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  // Historical audio metadata is retained; no PCM buffer in the S3 build.
+  uint8_t audioBuffer_[1]{};
+#else
   uint8_t audioBuffer_[config::kSdAudioRamBufferBytes]{};
+#endif
   uint8_t writeScratch_[config::kSdImuWriteBlockBytes >
                                 config::kSdAudioWriteBlockBytes
                             ? config::kSdImuWriteBlockBytes

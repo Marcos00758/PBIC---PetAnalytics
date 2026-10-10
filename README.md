@@ -57,6 +57,47 @@ Roteiro, comandos, resultados e verificação Python: [docs/SD_TEST.md](docs/SD_
 O ambiente padrão continua sendo a preparação sem escrita; dados e legado
 existentes são preservados. Resultados de desempenho exigem teste físico.
 
+## Coleta ESP32-S3 em dois núcleos — integração inicial
+
+Ambiente explícito `esp32s3_acquisition`, adicionado em 2026-10-10.
+**`pio run` sem `-e` continua compilando preparação, não coleta.** Três ICMs
+e dois BMPs são lidos no núcleo 1; fila de 256 pacotes alimenta SdFat no núcleo
+0. Grava contagens cruas v4/79 bytes e NVM em `/Sxxx/`, sem áudio, filtros,
+Wi-Fi/BLE ou stream binário contínuo. Formato/journal compatíveis com Python.
+
+A nova montagem passou na recuperação de prefixo, mas a suíte SD abortou
+por timeout. Integração destinada à **validação de bancada**, sem aprovação
+de cadência ou armazenamento longo; diagnóstico em [SD_TEST.md](docs/SD_TEST.md).
+
+Com monitor fechado, selecionar explicitamente (ajustar COM11 se mudar):
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_acquisition
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" run -e esp32s3_acquisition --target upload --upload-port COM11
+& "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe" device monitor --port COM11 --baud 115200
+```
+
+A coleta inicia automaticamente, sem `s`. Esperado: PBIC_STAGE=esp32s3_acquisition,
+três ICM_INIT ok=1, dois BMP_INIT raw25hz=1 nvm_valid=1 e ACQUISITION_START
+recording=1 com pasta nova. Sensor/NVM falho desabilita coleta; SD falho permite
+somente diagnóstico, recording=0, sem persistir dados novos. ACQUISITION_STATUS
+e I2C_FAILURES aparecem a cada 5 s mesmo abrindo monitor após o boot.
+
+Começar com sensores imóveis, conferir produção próxima de 100 pacotes/s,
+I2C, perdas, fila e latências; depois movimento e sessão longa. Preservar log
+com reset=<motivo> se desconectar. Desligamento pode perder a cauda até o último
+journal. Copiar a pasta completa (incluindo meta.txt/journal.bin) antes de analisar,
+por exemplo para data/S001 (ignorada pelo Git):
+
+```powershell
+& ./.venv/Scripts/python.exe -B python/parse_data.py data/S001/imu.bin
+```
+
+Conferir CRC, lacunas e taxa efetiva com contadores seriais. Fila, pilhas,
+desligamentos e crescimento após dez minutos precisam de ensaio físico;
+arquivos acima de 4 GiB dependem de exFAT e não estão validados. Não apagar
+sessões para repetir testes. [Arquitetura](docs/ARCHITECTURE.md).
+
 ## Aplicação Teensy da main — referência durante a migração
 
 As instruções abaixo descrevem a aplicação Teensy ainda não portada. Para

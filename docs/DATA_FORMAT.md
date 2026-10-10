@@ -1,5 +1,41 @@
 # Formato de dados
 
+## Coleta integrada ESP32-S3 — 2026-10-10
+
+`esp32s3_acquisition`, firmware `0.6.1`, grava os mesmos pacotes v4/79 bytes,
+CRC-8 e journal binário em `/Sxxx/`: imu.bin, meta.txt, journal.bin, status.txt.
+Não cria audio.raw; `audio_enabled=0`. Sem filtros, conversão ou altitude no
+arquivo. ICMs nos canais 4/5/6, BMP0/1 7/3, NVM individual em hexadecimal.
+Timestamps são da rodada, não tempos individuais de cada leitura.
+
+Metadados novos identificam placa S3 OEM FH4R2, SdFat 2.3.1, FSPI compartilhado,
+núcleos de aquisição/SD 1/0, `software_filters_enabled=0`, `icm_dlpf_enabled=0`
+e pinagem I2C/SPI. O campo genérico `sensor_filters_enabled` foi substituído
+para não afirmar uma verificação de filtros internos de todos os sensores.
+Para cada ICM, `icmN_config_verified=1` confirma o readback no boot:
+`icmN_accel_config=0x04`, `icmN_gyro_config=0x06`, `icmN_mag_mode=0x04`.
+Só é válido quando `icmN_ready=1`; falha impede iniciar coleta integrada.
+`icm_accel_internal_rate_hz=4500` e `icm_gyro_internal_rate_hz=9000` são
+nominais do datasheet em bypass, não medições: identificação explícita em
+`icm_internal_rate_source=datasheet_bypass_not_measured`.
+`imu_sample_rate_hz=100` continua sendo a meta de leitura pelo ESP32.
+Sem DLPF, essa leitura pode sofrer aliasing acima de 50 Hz.
+Também registra capacidade da fila em pacotes/bytes, prioridades, pilhas
+iniciais das tarefas e timeout I2C para comparar sessões com configurações iguais.
+Endianness, offsets, magic, tamanho e journal não mudam. Copiar a pasta completa
+da sessão para o parser respeitar prefixo confirmado, excluindo pré-alocação
+e cauda sem sync. Capturas históricas mantêm seus metadados.
+
+Status inclui `acquisition_max_lateness_us`, `acquisition_max_duration_us`,
+`queue_dropped_packets`, `storage_unavailable_packets`, `queue_high_water_packets`.
+São snapshots do produtor na cadência existente de manutenção: 18.000 pacotes,
+cerca de 3 min. Serial atualiza a cada 5 s e mostra também fila atual, pendências
+descartadas depois da falha e margem das pilhas. Após falha SD, preservar serial:
+não há garantia de persistir os contadores posteriores.
+
+Sequência avança com rodada falha ou rejeição por fila cheia, sem preencher
+lacunas. BMPs/magnetômetros usam o cache já documentado, sem interpolação/filtro.
+
 ## Etapa de preparação ESP32-S3
 
 O programa `esp32s3_setup.cpp` emite somente diagnóstico textual e não cria
@@ -23,6 +59,17 @@ para cada execução. Não altera o pacote de sensores v4 nem cria áudio.
 | `cNNN.chk` | Checkpoints append-only de 32 bytes, little-endian; último registro válido delimita o prefixo confirmado |
 | `results.csv` | Configuração, bytes/tempo, latências, atrasos da cadência, sucesso e histogramas por operação |
 | `errors.txt` | Operação e códigos de erro SdFat, quando ainda for possível escrever; serial preserva o diagnóstico imediato |
+
+Nas revisões do teste `test_version=2/3`, `meta.txt` identifica
+`spi_mode=SHARED_SPI`, `spi_bus`, `spi_begin=USER_SPI_BEGIN`, `reference_spi_hz=4000000`
+e `boot_path=SdFat_direct` ou `SdFat_after_Arduino_SD`. O segundo caminho
+significa que houve a sondagem Arduino SD e uma nova tentativa SdFat;
+o resultado da sondagem em si aparece no serial como `SD_REFERENCE`.
+O formato binário SDT1, checkpoints e colunas do CSV continuam iguais.
+A revisão 2 usa FSPI; a revisão 3 pode selecionar FSPI ou HSPI e grava o
+controlador efetivo em `spi_bus`. O mesmo valor é identificado no serial,
+incluindo erros de montagem. Nenhuma coluna nova foi adicionada ao CSV.
+Arquivos anteriores mantêm seus metadados originais.
 
 Registro de dados: magic `0x31544453` em 0..3 (`SDT1`), seed uint32 em 4..7
 (`0x50424943 XOR ID do caso`),

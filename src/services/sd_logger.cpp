@@ -7,6 +7,9 @@
 #include "config/constants.h"
 #include "config/pins.h"
 #include "utils/crc8.h"
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include "config/esp32_runtime.h"
+#endif
 
 namespace pet::services {
 namespace {
@@ -43,14 +46,14 @@ uint64_t audioPreallocationBytes() {
           config::kSdPreallocationMarginSeconds);
 }
 
-void printHexByte(File& file, uint8_t value) {
+void printHexByte(Print& file, uint8_t value) {
   if (value < 0x10) {
     file.print('0');
   }
   file.print(value, HEX);
 }
 
-void printIndexedCounters(File& file, const char* prefix,
+void printIndexedCounters(Print& file, const char* prefix,
                           const uint32_t* values, size_t count) {
   for (size_t i = 0; i < count; ++i) {
     file.print(prefix);
@@ -80,16 +83,24 @@ bool SdLogger::beginCard() {
 
   pinMode(pins::kSdChipSelect, OUTPUT);
   digitalWrite(pins::kSdChipSelect, HIGH);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  spi_.begin(pins::kSdSck, pins::kSdMiso, pins::kSdMosi,
+             pins::kSdChipSelect);
+  const SdSpiConfig spiConfig(pins::kSdChipSelect,
+                              SHARED_SPI | USER_SPI_BEGIN,
+                              SD_SCK_MHZ(config::kSdSpiClockMHz), &spi_);
+#else
   const SdSpiConfig spiConfig(pins::kSdChipSelect, SHARED_SPI,
                               SD_SCK_MHZ(config::kSdSpiClockMHz));
-  if (!SD.sdfs.begin(spiConfig)) {
+#endif
+  if (!filesystem().begin(spiConfig)) {
     confirmCardFailure("initialization");
     return false;
   }
 
-  const uint32_t bytesPerCluster = SD.sdfs.bytesPerCluster();
-  const uint32_t clusterCount = SD.sdfs.clusterCount();
-  const uint32_t freeClusterCount = SD.sdfs.freeClusterCount();
+  const uint32_t bytesPerCluster = filesystem().bytesPerCluster();
+  const uint32_t clusterCount = filesystem().clusterCount();
+  const uint32_t freeClusterCount = filesystem().freeClusterCount();
   if (bytesPerCluster == 0 || clusterCount == 0 ||
       freeClusterCount > clusterCount) {
     confirmCardFailure("capacity_query");
@@ -133,6 +144,12 @@ bool SdLogger::beginSession(
   if (!cardReady_) {
     return false;
   }
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  if (metadata.audioEnabled) {
+    confirmCardFailure("audio_suspended");
+    return false;
+  }
+#endif
   sessionMetadata_ = metadata;
   audioCountersAtSessionStart_ = audioCounters;
   counters_ = {};
@@ -147,7 +164,7 @@ bool SdLogger::beginSession(
     confirmCardFailure("session_number");
     return false;
   }
-  if (!SD.mkdir(sessionFolder_)) {
+  if (!filesystem().mkdir(sessionFolder_)) {
     confirmCardFailure("session_directory");
     return false;
   }
@@ -248,6 +265,11 @@ bool SdLogger::finalizeInitialSessionSetup(
   return true;
 }
 
+bool SdLogger::canEnqueuePacket() const {
+  return sessionActive_ && !stopRequested_ &&
+         sizeof(data::ImuPacket) <= config::kSdRamBufferBytes - bufferedBytes_;
+}
+
 bool SdLogger::enqueue(const data::ImuPacket& packet) {
   if (!sessionActive_ || stopRequested_) {
     return false;
@@ -271,12 +293,20 @@ bool SdLogger::enqueue(const data::ImuPacket& packet) {
 }
 
 bool SdLogger::canEnqueueAudioBlock() const {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  return false;
+#else
   return sessionActive_ && !stopRequested_ && sessionMetadata_.audioEnabled &&
          kAudioPcmBytesPerBlock <=
              config::kSdAudioRamBufferBytes - audioBufferedBytes_;
+#endif
 }
 
 bool SdLogger::enqueueAudio(const AudioPcmBlock& block) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  (void)block;
+  return false;
+#else
   if (!sessionActive_ || stopRequested_ ||
       !sessionMetadata_.audioEnabled) {
     return false;
@@ -326,9 +356,14 @@ bool SdLogger::enqueueAudio(const AudioPcmBlock& block) {
   audioGapInProgress_ = false;
   ++counters_.audioBlocksQueued;
   return true;
+#endif
 }
 
 bool SdLogger::appendAudioSamples(const int16_t* samples) {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  (void)samples;
+  return false;
+#else
   if (kAudioPcmBytesPerBlock >
       config::kSdAudioRamBufferBytes - audioBufferedBytes_) {
     return false;
@@ -347,6 +382,7 @@ bool SdLogger::appendAudioSamples(const int16_t* samples) {
     counters_.maxAudioBufferedBytes = audioBufferedBytes_;
   }
   return true;
+#endif
 }
 
 void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
@@ -434,35 +470,35 @@ void SdLogger::service(const AcquisitionCounters& acquisitionCounters,
 }
 
 bool SdLogger::verifyReadWrite() {
-  SD.remove(kCardTestPath);
-  File output = SD.open(kCardTestPath, FILE_WRITE);
+  filesystem().remove(kCardTestPath);
+  FsFile output = filesystem().open(kCardTestPath, O_WRONLY | O_CREAT | O_TRUNC);
   if (!output) {
     return false;
   }
   const size_t written = output.write(kTestPattern, sizeof(kTestPattern));
-  output.flush();
-  output.close();
-  if (written != sizeof(kTestPattern)) {
-    SD.remove(kCardTestPath);
+  const bool synced = output.sync();
+  const bool closed = output.close();
+  if (written != sizeof(kTestPattern) || !synced || !closed) {
+    filesystem().remove(kCardTestPath);
     return false;
   }
 
   uint8_t received[sizeof(kTestPattern)]{};
-  File input = SD.open(kCardTestPath, FILE_READ);
+  FsFile input = filesystem().open(kCardTestPath, O_RDONLY);
   if (!input) {
-    SD.remove(kCardTestPath);
+    filesystem().remove(kCardTestPath);
     return false;
   }
   const int bytesRead = input.read(received, sizeof(received));
   input.close();
-  SD.remove(kCardTestPath);
+  filesystem().remove(kCardTestPath);
   return bytesRead == static_cast<int>(sizeof(received)) &&
          memcmp(received, kTestPattern, sizeof(received)) == 0;
 }
 
 bool SdLogger::chooseSessionNumber() {
   uint32_t lastSession = 0;
-  File counter = SD.open(kSessionPath, FILE_READ);
+  FsFile counter = filesystem().open(kSessionPath, O_RDONLY);
   if (counter) {
     char text[16]{};
     const int count = counter.read(text, sizeof(text) - 1U);
@@ -475,7 +511,7 @@ bool SdLogger::chooseSessionNumber() {
   for (uint32_t candidate = lastSession + 1U; candidate != 0; ++candidate) {
     snprintf(sessionFolder_, sizeof(sessionFolder_), "/S%03lu",
              static_cast<unsigned long>(candidate));
-    if (!SD.exists(sessionFolder_)) {
+    if (!filesystem().exists(sessionFolder_)) {
       sessionNumber_ = candidate;
       return true;
     }
@@ -484,24 +520,25 @@ bool SdLogger::chooseSessionNumber() {
 }
 
 bool SdLogger::persistSessionNumber() {
-  SD.remove(kSessionTempPath);
-  File output = SD.open(kSessionTempPath, FILE_WRITE);
+  filesystem().remove(kSessionTempPath);
+  FsFile output = filesystem().open(kSessionTempPath, O_WRONLY | O_CREAT | O_TRUNC);
   if (!output) {
     return false;
   }
   output.println(sessionNumber_);
-  output.flush();
-  output.close();
+  const bool written = !output.getWriteError() && output.sync();
+  const bool closed = output.close();
+  if (!written || !closed) return false;
 
-  SD.remove(kSessionPath);
-  return SD.rename(kSessionTempPath, kSessionPath);
+  filesystem().remove(kSessionPath);
+  return filesystem().rename(kSessionTempPath, kSessionPath);
 }
 
 bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   char path[32]{};
   buildPath(path, sizeof(path), "meta.txt");
-  SD.remove(path);
-  File file = SD.open(path, FILE_WRITE);
+  filesystem().remove(path);
+  FsFile file = filesystem().open(path, O_WRONLY | O_CREAT | O_TRUNC);
   if (!file) {
     return false;
   }
@@ -512,7 +549,47 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
   file.println(micros());
   file.print("firmware_version=");
   file.println(config::kFirmwareVersion);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  file.println("board=ESP32-S3 Super Mini OEM FH4R2");
+  file.print("sd_library=SdFat ");
+  file.println(SD_FAT_VERSION_STR);
+  file.println("sd_spi_bus=FSPI");
+  file.println("sd_spi_mode=SHARED_SPI");
+  file.print("acquisition_core=");
+  file.println(config::kAcquisitionCore);
+  file.print("storage_core=");
+  file.println(config::kStorageCore);
+  file.print("queue_capacity_packets=");
+  file.println(config::kPacketQueueCapacity);
+  file.print("queue_capacity_bytes=");
+  file.println(config::kPacketQueueCapacity * sizeof(data::ImuPacket));
+  file.print("acquisition_priority=");
+  file.println(config::kAcquisitionPriority);
+  file.print("storage_priority=");
+  file.println(config::kStoragePriority);
+  file.print("acquisition_stack_bytes=");
+  file.println(config::kAcquisitionStackBytes);
+  file.print("storage_stack_bytes=");
+  file.println(config::kStorageStackBytes);
+  file.print("i2c_timeout_ms=");
+  file.println(config::kI2cTimeoutMs);
+  file.println("software_filters_enabled=0");
+  file.print("icm_dlpf_enabled=");
+  file.println(config::kIcmDlpfEnabled ? 1 : 0);
+  file.print("icm_accel_internal_rate_hz=");
+  file.println(config::kIcmAccelInternalRateHz);
+  file.print("icm_gyro_internal_rate_hz=");
+  file.println(config::kIcmGyroInternalRateHz);
+  file.println("icm_internal_rate_source=datasheet_bypass_not_measured");
+  file.print("i2c_sda="); file.println(pins::kI2cSda);
+  file.print("i2c_scl="); file.println(pins::kI2cScl);
+  file.print("sd_cs="); file.println(pins::kSdChipSelect);
+  file.print("sd_mosi="); file.println(pins::kSdMosi);
+  file.print("sd_miso="); file.println(pins::kSdMiso);
+  file.print("sd_sck="); file.println(pins::kSdSck);
+#else
   file.println("board=Teensy 4.0");
+#endif
   file.print("sd_spi_clock_mhz=");
   file.println(config::kSdSpiClockMHz);
   file.print("sd_imu_write_block_bytes=");
@@ -607,6 +684,16 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
     file.print(i);
     file.print("_ready=");
     file.println(metadata.icmReady[i] ? 1 : 0);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    file.print("icm"); file.print(i); file.print("_config_verified=");
+    file.println(metadata.icmReady[i] ? 1 : 0);
+    file.print("icm"); file.print(i); file.print("_accel_config=0x");
+    printHexByte(file, metadata.icmAccelConfig[i]); file.println();
+    file.print("icm"); file.print(i); file.print("_gyro_config=0x");
+    printHexByte(file, metadata.icmGyroConfig[i]); file.println();
+    file.print("icm"); file.print(i); file.print("_mag_mode=0x");
+    printHexByte(file, metadata.icmMagMode[i]); file.println();
+#endif
   }
 
   for (size_t i = 0; i < data::kBmpCount; ++i) {
@@ -634,15 +721,15 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
     file.println();
   }
 
-  file.flush();
-  file.close();
-  return true;
+  const bool written = !file.getWriteError() && file.sync();
+  const bool closed = file.close();
+  return written && closed;
 }
 
 bool SdLogger::hasSpaceForNextSession() {
-  const uint32_t bytesPerCluster = SD.sdfs.bytesPerCluster();
-  const uint32_t clusterCount = SD.sdfs.clusterCount();
-  const uint32_t freeClusterCount = SD.sdfs.freeClusterCount();
+  const uint32_t bytesPerCluster = filesystem().bytesPerCluster();
+  const uint32_t clusterCount = filesystem().clusterCount();
+  const uint32_t freeClusterCount = filesystem().freeClusterCount();
   if (bytesPerCluster == 0 || clusterCount == 0 ||
       freeClusterCount > clusterCount) {
     return false;
@@ -658,34 +745,34 @@ bool SdLogger::openAndPreallocateDataFiles() {
   char journalPath[32]{};
   buildPath(imuPath, sizeof(imuPath), "imu.bin");
   buildPath(journalPath, sizeof(journalPath), "journal.bin");
-  SD.remove(imuPath);
-  SD.remove(journalPath);
+  filesystem().remove(imuPath);
+  filesystem().remove(journalPath);
 
   const uint32_t startedUs = micros();
-  imuFile_ = SD.sdfs.open(imuPath, O_RDWR | O_CREAT | O_TRUNC);
+  imuFile_ = filesystem().open(imuPath, O_RDWR | O_CREAT | O_TRUNC);
   if (!imuFile_ || !imuFile_.preAllocate(imuPreallocatedBytes_) ||
       !imuFile_.seekSet(0)) {
     if (imuFile_) {
       imuFile_.truncate(0);
       imuFile_.close();
     }
-    SD.remove(imuPath);
+    filesystem().remove(imuPath);
     return false;
   }
 
-  journalFile_ = SD.sdfs.open(journalPath, O_RDWR | O_CREAT | O_TRUNC);
+  journalFile_ = filesystem().open(journalPath, O_RDWR | O_CREAT | O_TRUNC);
   if (!journalFile_) {
     imuFile_.truncate(0);
     imuFile_.close();
-    SD.remove(imuPath);
+    filesystem().remove(imuPath);
     return false;
   }
 
   if (sessionMetadata_.audioEnabled) {
     char audioPath[32]{};
     buildPath(audioPath, sizeof(audioPath), "audio.raw");
-    SD.remove(audioPath);
-    audioFile_ = SD.sdfs.open(audioPath, O_RDWR | O_CREAT | O_TRUNC);
+    filesystem().remove(audioPath);
+    audioFile_ = filesystem().open(audioPath, O_RDWR | O_CREAT | O_TRUNC);
     if (!audioFile_ || !audioFile_.preAllocate(audioPreallocatedBytes_) ||
         !audioFile_.seekSet(0)) {
       if (audioFile_) {
@@ -695,9 +782,9 @@ bool SdLogger::openAndPreallocateDataFiles() {
       imuFile_.truncate(0);
       imuFile_.close();
       journalFile_.close();
-      SD.remove(audioPath);
-      SD.remove(imuPath);
-      SD.remove(journalPath);
+      filesystem().remove(audioPath);
+      filesystem().remove(imuPath);
+      filesystem().remove(journalPath);
       return false;
     }
   }
@@ -761,9 +848,9 @@ bool SdLogger::writeStatus(
   char temporaryPath[32]{};
   buildPath(statusPath, sizeof(statusPath), "status.txt");
   buildPath(temporaryPath, sizeof(temporaryPath), "status.tmp");
-  SD.remove(temporaryPath);
+  filesystem().remove(temporaryPath);
 
-  File file = SD.open(temporaryPath, FILE_WRITE);
+  FsFile file = filesystem().open(temporaryPath, O_WRONLY | O_CREAT | O_TRUNC);
   if (!file) {
     return false;
   }
@@ -811,6 +898,18 @@ bool SdLogger::writeStatus(
                        acquisitionCounters.magOverflows, data::kIcmCount);
   file.print("usb_dropped_packets=");
   file.println(acquisitionCounters.usbDroppedPackets);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  file.print("acquisition_max_lateness_us=");
+  file.println(acquisitionCounters.maxScheduleLatenessUs);
+  file.print("acquisition_max_duration_us=");
+  file.println(acquisitionCounters.maxAcquisitionDurationUs);
+  file.print("queue_dropped_packets=");
+  file.println(acquisitionCounters.queueDroppedPackets);
+  file.print("storage_unavailable_packets=");
+  file.println(acquisitionCounters.storageUnavailablePackets);
+  file.print("queue_high_water_packets=");
+  file.println(acquisitionCounters.queueHighWaterPackets);
+#endif
   if (sessionMetadata_.audioEnabled) {
     file.print("audio_blocks_received=");
     file.println(audioCounters.blocksReceived -
@@ -934,11 +1033,12 @@ bool SdLogger::writeStatus(
     file.print("audio_session_start_timestamp_us=");
     file.println(audioFirstTimestampUs_);
   }
-  file.flush();
-  file.close();
+  const bool written = !file.getWriteError() && file.sync();
+  const bool closed = file.close();
+  if (!written || !closed) return false;
 
-  SD.remove(statusPath);
-  return SD.rename(temporaryPath, statusPath);
+  filesystem().remove(statusPath);
+  return filesystem().rename(temporaryPath, statusPath);
 }
 
 bool SdLogger::writeBufferedBytes(bool allowPartialBlock) {
@@ -1351,6 +1451,12 @@ void SdLogger::confirmCardFailure(const char* reason) {
   cardReady_ = false;
   Serial.print("SD_ERROR_CONFIRMED reason=");
   Serial.print(reason);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  Serial.print(" spi_bus=FSPI code=");
+  Serial.print(filesystem().sdErrorCode());
+  Serial.print(" data=");
+  Serial.print(filesystem().sdErrorData());
+#endif
   Serial.print(" recording_disabled=1 reboot_required=1 led_delay_ms=");
   Serial.println(config::kSdFailureLedDelayMs);
   const uint32_t nowMs = millis();
@@ -1392,6 +1498,18 @@ void SdLogger::confirmCardFailure(const char* reason) {
 }
 
 void SdLogger::updateFailureIndicator() {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  // The S3 uses an addressable LED, not the Teensy SCK/LED pin.
+  // Leave GPIO48 untouched; serial reports the error and SPI is shut down.
+  if (failureConfirmed_ && !failureIndicatorReady_ &&
+      millis() - failureConfirmedAtMs_ >= config::kSdFailureLedDelayMs) {
+    filesystem().end();
+    spi_.end();
+    digitalWrite(pins::kSdChipSelect, HIGH);
+    failureIndicatorReady_ = true;
+    Serial.println("SD_ERROR_SIGNAL spi=disabled rgb_led=unused");
+  }
+#else
   if (!failureConfirmed_ || !config::kSdFailureIndicatorEnabled) {
     return;
   }
@@ -1418,6 +1536,7 @@ void SdLogger::updateFailureIndicator() {
        phaseMs < config::kSdFailureLedSecondPulseMs +
                      config::kSdFailureLedPulseMs);
   digitalWrite(LED_BUILTIN, ledOn ? HIGH : LOW);
+#endif
 }
 
 void SdLogger::recordOperationDuration(uint32_t durationUs,

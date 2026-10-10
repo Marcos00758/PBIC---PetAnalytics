@@ -101,6 +101,12 @@ montagem Teensy e não confirma a bateria desta montagem.
 
 ## USB e montagem
 
+**Revisão de bancada em 2026-10-10:** o usuário substituiu ESP32 e módulo SD,
+confirmando mesmo FH4R2, memórias e pinagem. A revisão eletrônica do novo
+adaptador não foi informada. A montagem identifica/pré-aloca o cartão, mas
+houve timeout de escrita. Registro do cartão e resultados em [SD_TEST.md](SD_TEST.md).
+Duas peças trocadas juntas não permitem atribuir a falha anterior a apenas uma.
+
 O perfil inicial usa USB nativa Serial/JTAG CDC (`ARDUINO_USB_MODE=1`), com
 CDC no boot; não usa adaptador USB-UART externo. HID/OTG poderá exigir outra
 configuração USB em etapa posterior. Os botões BOOT/RESET permitem entrada

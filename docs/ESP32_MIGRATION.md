@@ -3,7 +3,8 @@
 Registro de 2026-10-05, atualizado após confirmação do hardware pelo usuário.
 Destino: placa OEM ESP32-S3 Super Mini com ESP32-S3FH4R2.
 O ambiente padrão agora é `esp32s3_supermini`, com uma entrada de preparação
-separada. A aquisição e o logger ainda precisam ser portados para esse ambiente.
+separada. Desde 2026-10-10 há integração de aquisição/logger no ambiente
+explícito `esp32s3_acquisition`; validação física/concorrência permanece pendente.
 
 ## Hardware e PlatformIO confirmados
 
@@ -186,15 +187,100 @@ por perda de energia. Validar desligamentos abruptos no teste independente de SD
 na ausência de truncamento final, o leitor deve respeitar o prefixo confirmado
 e os detalhes de pré-alocação exFAT da versão SdFat escolhida.
 
+## Referências de coleta recebidas em 2026-10-07
+
+O usuário enviou `peitoral.ino` e `Capsule.ino` como referências M5Stack para a
+futura coleta no ESP32-S3. Originais preservados, com hashes e análise, em
+[references/m5stack/README.md](references/m5stack/README.md). O Capsule fornece
+o exemplo de duas tarefas por afinidade; o peitoral exemplifica arquivos abertos
+e manutenção periódica, mas não separa aquisição/SD em tarefas da aplicação.
+Não copiar a sincronização insegura de buffers JSON nem suas APIs de timer 3.x
+para o core 2.0.17 atual.
+
+Plano atualizado: coleta proprietária do I2C no núcleo 1 e consumidor
+proprietário do SD no núcleo 0, comunicados por fila limitada de pacotes crus.
+Afinidades, prioridades e memória dependem de validação sob carga; detalhes em
+[ARCHITECTURE.md](ARCHITECTURE.md#distribuição-planejada-entre-os-núcleos).
+Não houve implementação dessa distribuição nem alteração de bibliotecas.
+
+**Situação do SD:** assumir sucesso apenas para avançar no planejamento, conforme
+pedido do usuário. Os erros anteriores de inicialização não estão resolvidos
+por evidência experimental. O usuário montará outro protótipo com outro ESP32
+para isolar o hardware; os resultados devem ser registrados antes de aprovar
+armazenamento/coleta integrada. Não reclassificar os ensaios anteriores como sucesso.
+
 ## Próximas validações
+
+**Correção localizada ICM, firmware S3 0.6.1:** mantida Adafruit ICM20X 2.0.7,
+contornando o registrador incorreto em `enableGyrolDLPF()` no nosso driver.
+ACCEL_CONFIG=0x04/GYRO_CONFIG_1=0x06 desativam os DLPFs e preservam as faixas;
+readback dos dois registradores e de CNTL2=0x04 (AK09916) é obrigatório no boot.
+Constantes distinguem conversão nominal 4500/9000 Hz de leitura ESP32 a 100 Hz.
+Serial/metadados mostram os registradores confirmados. Sem alteração de pinos,
+tarefas, SD ou pacotes; somente metadados textuais recebem campos específicos.
+O bypass está documentado nas tabelas 16/18 do
+[datasheet TDK](https://product.tdk.com/system/files/dam/doc/product/sensor/mortion-inertial/imu/data_sheet/ds-000189-icm-20948-v1.5.pdf);
+o defeito pode ser conferido no
+[código Adafruit 2.0.7](https://github.com/adafruit/Adafruit_ICM20X/blob/2.0.7/Adafruit_ICM20X.cpp#L543).
+Validar na placa três `ICM_INIT` com `ok=1 config_verified=1`, registradores
+0x04/0x06/0x04 e os mesmos valores em meta.txt. Taxas físicas não foram medidas.
+Alias acima de 50 Hz permanece possível; nenhum filtro foi acrescentado.
+
+**Atualização em 2026-10-10:** o usuário substituiu ESP32 e módulo SD, mantendo
+FH4R2 e pinos. Houve montagem/recuperação de prefixo, mas timeout de escrita
+abortou a suíte. [SD_TEST.md](SD_TEST.md) registra resultados e motivo de reset
+agora exposto no serial. Não assumir estabilidade resolvida pela troca.
+
+Integração inicial disponível em `esp32s3_acquisition`: coleta núcleo 1,
+SD núcleo 0, fila estática por valor, sensores crus v4 e journal existentes.
+Logger usa SdFat externo no S3 e preserva backend Teensy. Áudio fica excluído,
+sem instalar M5Unified/Firebase/NTP. Afinidades, prioridades e pilhas precisam
+de medição em placa; roteiro de bancada no README. Não houve upload automático.
 
 Pinagem externa, canais, alimentação por conversor e USB foram definidos.
 VCC do módulo SD foi confirmado em 3,3 V e a montagem está concluída. Registrar
 cartão utilizado, corrente do conversor/regulador e detalhes do esquema OEM.
 Validar flash/PSRAM/USB e executar o novo `esp32s3_sd_test` na placa para
-avaliar SdFat isoladamente. Portar os cinco sensores, conferir a compensação dos BMP390 com
-dados crus/NVM, restaurar gravação SD e testar tarefas/fila sob carga prolongada.
+avaliar SdFat isoladamente. Validar os cinco sensores no novo ambiente,
+conferir compensação dos BMP390 com dados crus/NVM e testar tarefas/fila e
+gravação prolongada. Não aprovar sessões longas enquanto timeouts e
+interrupções USB/reset continuarem sem diagnóstico.
 Sem filtros de sensores ou pós-processamento na nova coleta, conforme pedido.
+
+## Validação da integração — 2026-10-10
+
+- Quatro builds aprovados: teensy40, esp32s3_supermini, esp32s3_sd_test e
+  esp32s3_acquisition. Coleta recompilada após completar metadados:
+  **51.348 bytes de RAM estática / 345.777 bytes de flash**. Pilhas do RTOS
+  e alocações feitas no boot não estão incluídas nessa RAM estática.
+- 43 testes Python aprovados. Quatro novos compilam aquisição/pacote/CRC C++
+  reais com relógio e sensores injetados, conferindo leitura em Python,
+  deadlines sem rajadas, falha de sensor e rollover. Não validam drivers
+  físicos nem escalonamento real dos dois núcleos.
+- Snapshot preservado: 58 arquivos, patch local e 44 experimentos,
+  236.521.430 bytes. `git diff --check` aprovado.
+- Não houve upload, commit ou push pelo agente. Estado físico disponível
+  é somente o log SD fornecido pelo usuário; não aprova esta integração.
+- Pendentes: sensores/NVM na montagem nova, fila sob atraso/falha do SD,
+  jitter, pilhas, recuperação por journal e gravações prolongadas.
+
+Arquivos criados/alterados nesta integração:
+
+- Entrada e configuração: `src/esp32/main.cpp`, `src/config/esp32_runtime.h`,
+  `src/config/constants.h`, `platformio.ini`.
+- Serviços compartilhados: `src/services/sd_logger.cpp`, `sd_logger.h`,
+  `imu_acquisition.cpp`, `imu_acquisition.h`, `audio_capture.h` (somente
+  unificação dos tipos históricos, sem ativar áudio no S3).
+- Motivo de reset: `src/utils/esp32_reset_reason.h`,
+  `src/diagnostics/esp32s3_sd_test.cpp` (preservando alterações anteriores).
+- Testes: `test/acquisition_host.cpp`, `test/acquisition_host/Arduino.h`,
+  `test/acquisition_host/drivers/icm20948.h`,
+  `test/acquisition_host/drivers/bmp390.h`, `python/tests/test_acquisition_host.py`.
+- Documentação: `README.md`, `docs/ARCHITECTURE.md`, `docs/DATA_FORMAT.md`,
+  `docs/ESP32_MIGRATION.md`, `docs/HARDWARE_SPEC.md`, `docs/SD_TEST.md`.
+
+As referências M5Stack já preservadas não foram alteradas nesta etapa.
+Commit sugerido: `feat(esp32): add dual-core raw sensor acquisition with SdFat`.
 
 ## Validação da preparação atual
 

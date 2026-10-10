@@ -1,5 +1,67 @@
 # Arquitetura
 
+## Integração ESP32-S3 de sensores e SD — 2026-10-10
+
+O ambiente explícito `esp32s3_acquisition` compila `src/esp32/main.cpp`, drivers
+I2C, aquisição, logger e utilitários. O padrão `esp32s3_supermini` permanece
+preparação sem escrita; `esp32s3_sd_test` continua isolado. Teensy mantém sua
+entrada original, excluindo `esp32/`. Aprovação física continua pendente:
+o ensaio SD novo abortou por timeout, conforme [SD_TEST.md](SD_TEST.md).
+
+`pbic-sensors`, prioridade 3, núcleo 1, é dono exclusivo de Wire/PCA9548A e
+cinco sensores, inclusive inicialização. I2C GPIO1/2 a 400 kHz, timeout 10 ms.
+Todos os sensores e as duas NVM precisam estar válidos para iniciar aquisição.
+Mantém agendador anti-rajada de 100 Hz, BMPs a 25 Hz e cache de magnetômetros.
+Cede um tick (1 ms, exigido no build) entre consultas; não promete precisão
+de microsegundos sem medição física. Não executa SD, áudio ou filtros.
+
+Firmware S3 `0.6.1`: o driver escreve e relê ACCEL_CONFIG (banco 2, 0x14)
+e GYRO_CONFIG_1 (0x01), exigindo respectivamente 0x04 e 0x06: ±8 g,
+±2000 graus/s e FCHOICE=0 (DLPF em bypass). Confirma também CNTL2=0x04
+do AK09916 (20 Hz). Falha de escrita/leitura ou divergência impede inicialização.
+Isso contorna `enableGyrolDLPF()` da Adafruit 2.0.7, que escreve em ACCEL_CONFIG.
+Serial e metadados registram o readback de cada ICM; confirmação física pendente.
+As taxas internas nominais em bypass são 4500/9000 Hz (accel/gyro), conforme
+o [datasheet TDK, tabelas 16/18](https://product.tdk.com/system/files/dam/doc/product/sensor/mortion-inertial/imu/data_sheet/ds-000189-icm-20948-v1.5.pdf).
+Os divisores 10 permanecem escritos, mas não determinam essas taxas em bypass.
+Leitura pelo ESP32 continua a 100 Hz: pode haver aliasing acima de 50 Hz.
+Não há interpolação, média ou filtro de software para evitar esse efeito.
+
+`pbic-sd`, prioridade 2, núcleo 0, recebe o resultado de setup por cópia, monta
+SdFat com SPIClass FSPI próprio e `SHARED_SPI | USER_SPI_BEGIN`, cria sessão e
+libera aquisição. Só essa tarefa chama o logger, inclusive enqueue/manutenção.
+Backend Teensy usa SD.sdfs; ESP32 usa SdFs externo. Textos usam FsFile e
+conferem escrita/sync/fechamento. Mantém buffer 8 KiB, blocos 512 bytes, 12 MHz,
+pré-alocação de dez minutos, journal após sync e sessão contínua sem comando
+de encerramento. Configuração SPI é inicial, sem aprovação pela suíte física.
+
+Fila FreeRTOS estática em SRAM: **256 pacotes completos por valor**, 20.224
+bytes, 2,56 s nominais, além do buffer privado do logger. Com buffer cheio,
+consumidor deixa pacotes na fila. Com fila cheia, produtor rejeita pacote novo,
+conta perda e mantém sequência. High-water é observado após enqueue; rejeição
+por fila cheia registra explicitamente o máximo. Uma fila estática de tamanho
+1 publica snapshots dos contadores por `xQueueOverwrite`. Consumidor recebe
+cópias, nunca referências ao objeto vivo do produtor. Event group comunica
+início/gravação; nenhum mutex/seção crítica é mantido durante SD/I2C.
+
+Pilhas iniciais: 6.144/8.192 bytes para aquisição/SD, alocadas pelo RTOS.
+Criação das filas e tarefas é conferida; ambas aguardam um gate antes de tocar
+os barramentos. Não há alocação por amostra. `config/esp32_runtime.h` reúne
+afinidades, prioridades e tamanhos. `loop()` só cede CPU. Status serial a cada
+5 s mostra produção, I2C, perdas, fila, maior atraso/tempo de aquisição,
+latências SD e margem das pilhas. USB binária permanece desabilitada.
+
+Se SD falhar, coleta continua para diagnóstico, contando pacotes novos sem
+armazenamento. Consumidor conta também pendências descartadas após falha.
+Gravação exige reboot para retomar; SPI é encerrado após o atraso previsto,
+sem aplicar o LED Teensy ao WS2812. Journal delimita dados confirmados.
+Depois da falha, contadores novos podem existir só no serial.
+
+Áudio está excluído das fontes e dependências. Tipos históricos foram unificados
+em `data/audio_types.h`; S3 não instancia captura, I2S ou buffer PCM de 32 KiB,
+e rejeita sessão pedindo áudio. Retomada exige etapa própria. A seção planejada
+de 2026-10-07 abaixo é o histórico da decisão agora implementada em bancada.
+
 ## Preparação ESP32-S3 em 2026-10-05
 
 O destino é a placa OEM ESP32-S3FH4R2. [HARDWARE_SPEC.md](HARDWARE_SPEC.md)
@@ -39,7 +101,34 @@ no diagnóstico; a carga de 7.900 bytes/s é sintética e síncrona.
 nomes públicos como aliases, preservando o comportamento Teensy. A preparação
 informa a frequência compartilhada; o teste compara também 4/20 MHz e
 1.024/4.096 bytes. O SD usa `SdFs`/`FsFile` e `SPI` explícito com os GPIOs
-confirmados. `DEDICATED_SPI` pressupõe que nenhum outro dispositivo usa esse SPI.
+confirmados. O teste usa `SHARED_SPI | USER_SPI_BEGIN`: o programa prepara
+uma instância própria `SPIClass` e SdFat recebe essa mesma instância sem
+chamar `begin()` novamente. Isso aplica a organização do `main` de referência
+(cartão em uma instância SPI própria) aos controladores disponíveis no S3;
+não copia o VSPI/CS=5 nem a aquisição SPI dos IMUs do exemplo antigo.
+O modo compartilhado usa transações por operação; a matriz deve ser comparada
+com outras execuções que tenham a mesma configuração.
+
+A inicialização de referência foi baseada no `SDCard.cpp` fornecido pelo
+usuário, que usa `SD.begin(cs, spi)` do Arduino-ESP32. Se SdFat falhar no boot,
+o diagnóstico encerra esse driver, configura o SPI, tenta `SD.begin` a 4 MHz
+(default do core 2.0.17), informa tipo/capacidade e chama `SD.end()`. Depois
+reconfigura o barramento e tenta SdFat uma única vez. Essa sondagem não abre
+arquivos nem habilita formatação; as bibliotecas não montam o cartão juntas.
+Somente SdFat realiza os ensaios, preservando FAT/exFAT e pré-alocação.
+O resultado dessa referência também envolve montagem do filesystem, portanto
+uma falha em `SD.begin` não identifica sozinha uma falha de transporte SPI.
+
+A revisão v3 compara os controladores FSPI/HSPI do S3 com os mesmos GPIOs.
+Testa primeiro o controlador registrado na última execução (FSPI quando não
+há registro), com montagem SdFat, referência Arduino SD e um retry SdFat.
+Se falhar, encerra ambos os drivers e repete essa sequência no outro controlador.
+Somente um controlador fica inicializado por vez. Caso nenhum funcione,
+encerra a inicialização sem criar arquivos de ensaio. O controlador escolhido
+fica nos metadados e na NVS. Se a recuperação de uma execução anterior exigir
+mudar o controlador, ela é suspensa com `SD_RECOVERY_BUS_CHANGED`, mantendo
+arquivos e intenção de reset; o usuário pode verificar os dados em Python ou
+iniciar outra execução. Isso evita misturar configurações nas métricas da sessão.
 
 O gerador/formato portátil fica em `sd_test_format.h`. Dados, manifesto,
 checkpoints e métricas ficam em `/SDTEST/Rxxxxxx/`, com criação exclusiva e
@@ -56,6 +145,53 @@ e clocks não define automaticamente a configuração final: integridade,
 cadência e maiores latências precisam ser avaliadas juntas. Concorrência com
 aquisição em outro núcleo permanece uma etapa futura. Roteiro em
 [SD_TEST.md](SD_TEST.md), formato em [DATA_FORMAT.md](DATA_FORMAT.md).
+
+## Distribuição planejada entre os núcleos
+
+Registro de **2026-10-07**, baseado nos exemplos M5Stack enviados pelo usuário,
+preservados e analisados em [references/m5stack/README.md](references/m5stack/README.md).
+É uma proposta para a etapa de coleta, não uma mudança no firmware atual.
+O funcionamento do SD será assumido para o planejamento; sua aprovação física
+continua pendente no novo protótipo com outro ESP32.
+
+| Responsabilidade | Afinidade inicial proposta | Propriedade exclusiva |
+|---|---|---|
+| Aquisição dos três ICM-20948 e dois BMP390, timestamps e pacotes crus | Núcleo 1 | `Wire`, seleção de canal PCA9548A e drivers dos cinco sensores |
+| Gravação em blocos, pré-alocação, `sync()`, journal e manutenção | Núcleo 0 | SPI do SD, SdFat, arquivos e estado interno do logger |
+
+Preferimos começar com coleta no núcleo 1 e armazenamento no 0, usando tarefas
+explicitamente fixadas. A inversão em relação ao Capsule é uma escolha inicial
+para medir, não uma exigência do hardware. Serviços do sistema continuam nos
+dois núcleos; afinidade não torna um núcleo exclusivo da aplicação. Wi-Fi/BLE
+continuam fora desta etapa. O `loop()` deve ceder CPU e não duplicar acessos a
+sensores, SD ou filas. Prioridades e pilhas serão definidas e medidas ao portar.
+
+A comunicação inicial recomendada é uma **fila FreeRTOS limitada de pacotes
+binários completos, copiados por valor**, com armazenamento pré-alocado em
+SRAM interna. O consumidor recebe a cópia e alimenta sozinho o buffer do logger.
+O produtor nunca chama diretamente o `enqueue()` do logger atual a partir de
+outro núcleo. Assim, ponteiros e buffers mutáveis não ficam compartilhados;
+essa abordagem é mais simples de verificar do que o duplo JSON do Capsule.
+Buffers por lote com transferência de posse ficam como otimização posterior,
+somente se medições justificarem. PSRAM não é necessária à fila inicial.
+
+A tarefa de coleta preservará o agendamento anti-rajada dos sensores e usará
+tempo monotônico para timestamps/deadlines. NTP, formatação textual, escrita
+SD e espera indefinida por espaço não entram nesse caminho. Se a fila lotar,
+contabilizar a perda explicitamente e preservar a sequência de aquisição;
+a política inicial proposta é rejeitar o pacote novo, mantendo os já enfileirados.
+O consumidor aguarda dados com bloqueio do RTOS, sem polling contínuo.
+Não executar SD/I2C em ISR nem manter mutex/seção crítica durante I/O de SD.
+
+O núcleo extra permite que a coleta continue durante uma chamada SD longa,
+até o limite da fila. Não elimina pausas do cartão ou contenção de recursos
+compartilhados. Dimensionar a memória pelo pior atraso observado, pela vazão
+de 7.900 bytes/s e por margem, considerando também o buffer privado do logger.
+Validar jitter/deadlines perdidos, sequência/CRC, erros I2C/SD, fila máxima,
+perdas, maior latência de `write`/`sync`, vazão sustentada e margem das pilhas,
+inclusive com consumidor atrasado ou SD em falha. O teste SD atual é síncrono
+e não valida essa concorrência. Áudio/filtros permanecem suspensos; a sessão
+continua sem botão/comando de encerramento normal nesta etapa.
 
 ## Aplicação Teensy ainda não portada
 
@@ -252,16 +388,16 @@ compensação Bosch, sem uso de `float` no caminho de aquisição do firmware.
 ## Aquisição inicial dos ICM-20948
 
 O firmware usa `Adafruit ICM20X 2.0.7` para os breakouts ICM-20948 e um driver
-próprio baseado em `Wire` para o PCA9548A. Os canais ICM são `0`, `1` e `4`.
+próprio baseado em `Wire` para o PCA9548A. Os canais ICM atuais são `4`, `5` e `6`.
 
 Configuração inicial de bancada:
 
-- acelerômetro: faixa de `+/-8 g`, divisor 10, ODR aproximado de 102,3 Hz;
-- giroscópio: faixa de `+/-2000 graus/s`, divisor 10, ODR de 100 Hz;
-- filtros digitais passa-baixas desativados;
-- magnetômetro AK09916 configurado e adquirido a 20 Hz com cache;
+- acelerômetro: faixa de `+/-8 g`, DLPF em bypass, taxa interna nominal 4500 Hz;
+- giroscópio: faixa de `+/-2000 graus/s`, DLPF em bypass, taxa interna nominal 9000 Hz;
+- filtros DLPF confirmados por readback no boot; sem filtro de software;
+- AK09916 a 20 Hz, proxy consultado a 25 Hz com cache;
 - rodada de leitura dos três ICMs a 100 Hz, agendada com `micros()`;
-- saída USB binária não bloqueante em pacotes v4 de 79 bytes.
+- ESP32 grava pacotes v4 de 79 bytes no SD; saída USB binária pertence ao legado.
 
 A biblioteca Adafruit inicializa o AK09916 durante `begin_I2C()`. O driver o
 mantém em modo contínuo a 20 Hz. As faixas foram ampliadas para `+/-8 g` e

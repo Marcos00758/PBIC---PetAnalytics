@@ -21,6 +21,12 @@ struct AcquisitionCounters {
   uint32_t magDataOverruns[data::kIcmCount] = {0, 0, 0};
   uint32_t magOverflows[data::kIcmCount] = {0, 0, 0};
   uint32_t usbDroppedPackets = 0;
+  uint32_t maxScheduleLatenessUs = 0;
+  uint32_t maxAcquisitionDurationUs = 0;
+  // Filled in the ESP32 producer's published snapshot, not shared live state.
+  uint32_t queueDroppedPackets = 0;
+  uint32_t storageUnavailablePackets = 0;
+  uint32_t queueHighWaterPackets = 0;
 };
 
 class ImuAcquisition {

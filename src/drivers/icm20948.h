@@ -56,6 +56,10 @@ class Icm20948 {
   uint8_t address() const { return address_; }
   uint8_t whoAmI() const { return whoAmI_; }
   uint8_t magnetometerWhoAmI() const { return magnetometerWhoAmI_; }
+  // Boot readback; only validated when initialized() is true.
+  uint8_t accelConfig() const { return accelConfig_; }
+  uint8_t gyroConfig() const { return gyroConfig_; }
+  uint8_t magnetometerMode() const { return magnetometerMode_; }
 
  private:
   bool detectAddress();
@@ -76,6 +80,9 @@ class Icm20948 {
   uint8_t address_ = 0;
   uint8_t whoAmI_ = 0;
   uint8_t magnetometerWhoAmI_ = 0;
+  uint8_t accelConfig_ = 0;
+  uint8_t gyroConfig_ = 0;
+  uint8_t magnetometerMode_ = 0;
   bool initialized_ = false;
 };
 

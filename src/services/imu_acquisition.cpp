@@ -59,8 +59,11 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
     return false;
   }
 
-  const uint32_t latePeriods =
-      utils::elapsedMicros(nextSampleUs_, nowUs) / samplePeriodUs_;
+  const uint32_t latenessUs = utils::elapsedMicros(nextSampleUs_, nowUs);
+  if (latenessUs > counters_.maxScheduleLatenessUs) {
+    counters_.maxScheduleLatenessUs = latenessUs;
+  }
+  const uint32_t latePeriods = latenessUs / samplePeriodUs_;
   counters_.missedScheduleReadings += latePeriods;
   sequence_ = static_cast<uint16_t>(sequence_ + latePeriods);
   nextSampleUs_ += (latePeriods + 1U) * samplePeriodUs_;
@@ -80,6 +83,10 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
   }
 
   if (!roundSucceeded) {
+    const uint32_t duration = micros() - nowUs;
+    if (duration > counters_.maxAcquisitionDurationUs) {
+      counters_.maxAcquisitionDurationUs = duration;
+    }
     ++counters_.failedAcquisitionRounds;
     return false;
   }
@@ -148,6 +155,10 @@ bool ImuAcquisition::poll(data::ImuPacket& packet) {
   }
 
   utils::buildImuPacket(packet, nowUs, packetSequence, values, bmpRaw_);
+  const uint32_t duration = micros() - nowUs;
+  if (duration > counters_.maxAcquisitionDurationUs) {
+    counters_.maxAcquisitionDurationUs = duration;
+  }
   ++counters_.packetsProduced;
   return true;
 }

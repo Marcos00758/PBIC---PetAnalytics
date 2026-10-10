@@ -19,7 +19,14 @@ constexpr uint8_t kMicrophoneChannels = 1;
 constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+constexpr char kFirmwareVersion[] = "0.6.1";
+static_assert(!kMicrophoneDiagnosticEnabled && !kAudioSdDiagnosticEnabled &&
+                  !kMicrophoneRecordingEnabled && !kUsbBinaryStreamEnabled,
+              "ESP32 acquisition currently supports SD sensors only");
+#else
 constexpr char kFirmwareVersion[] = "0.5.1";
+#endif
 
 constexpr size_t kSdRamBufferBytes = storage::kBufferBytes;
 constexpr size_t kSdAudioRamBufferBytes = 32768;
@@ -118,10 +125,16 @@ constexpr uint32_t kMagPollRateHz = 25;
 constexpr uint8_t kIcmAccelRangeG = 8;
 constexpr uint16_t kIcmGyroRangeDps = 2000;
 
-// Internal sensor ODRs: accel ~=102.3 Hz and gyro =100 Hz.
+constexpr bool kIcmDlpfEnabled = false;
+static_assert(!kIcmDlpfEnabled, "Raw acquisition requires ICM DLPF bypass");
+// Datasheet bypass rates; not measured rates or ESP32 polling frequencies.
+constexpr uint32_t kIcmAccelInternalRateHz = 4500;
+constexpr uint32_t kIcmGyroInternalRateHz = 9000;
+// Retained register values; these dividers do not set ODR in bypass mode.
 constexpr uint16_t kIcmAccelRateDivisor = 10;
 constexpr uint8_t kIcmGyroRateDivisor = 10;
 
+// Host acquisition target, independent of the internal conversion rates.
 constexpr uint32_t kImuSampleRateHz = 100;
 constexpr uint32_t kImuSamplePeriodUs = 1000000UL / kImuSampleRateHz;
 constexpr uint32_t kBmpSamplesPerImuSample =
