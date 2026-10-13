@@ -51,6 +51,15 @@ afinidades, prioridades e tamanhos. `loop()` só cede CPU. Status serial a cada
 5 s mostra produção, I2C, perdas, fila, maior atraso/tempo de aquisição,
 latências SD e margem das pilhas. USB binária permanece desabilitada.
 
+Diagnóstico de inicialização (2026-10-13): `SensorSetup` guarda resultados de
+I2C/PCA, desativação final dos canais, IDs/endereço dos ICMs e chip ID/init dos
+BMPs, além dos metadados existentes. Produtor envia essa estrutura por cópia
+na fila de setup. Consumidor repete o resultado a cada 5 s em
+`SENSOR_INIT_SUMMARY source=boot_snapshot`, seguido de I2C/PCA/ICM/BMP.
+I2C/PCA falho identifica sensores não testados (`sensors_skipped=1`).
+Esse relatório não consulta drivers/barramentos, não reinicializa dispositivos
+e não altera pacotes, arquivos SD ou critérios para liberar aquisição.
+
 Se SD falhar, coleta continua para diagnóstico, contando pacotes novos sem
 armazenamento. Consumidor conta também pendências descartadas após falha.
 Gravação exige reboot para retomar; SPI é encerrado após o atraso previsto,
@@ -412,7 +421,9 @@ O driver lê diretamente o bloco de 12 bytes de acelerômetro e giroscópio a
 partir do registrador `0x2D`, em big-endian. A biblioteca Adafruit continua
 responsável pela inicialização e configuração do ICM. A leitura direta permite
 validar os retornos de `Wire`, transmitir os valores `int16` sem conversão no
-microcontrolador e contabilizar falhas I2C por sensor.
+microcontrolador e contabilizar falhas I2C por sensor. Na configuração atual,
+o driver próprio também escreve e verifica os registradores de DLPF/faixa;
+a leitura auxiliar rejeita NACK do SLV4 e perda de arbitragem.
 
 O serviço `src/services/imu_acquisition` contém o agendador anti-rajada,
 sequência e contadores. `src/data/imu_packet.h` define o pacote, enquanto

@@ -83,6 +83,14 @@ recording=1 com pasta nova. Sensor/NVM falho desabilita coleta; SD falho permite
 somente diagnóstico, recording=0, sem persistir dados novos. ACQUISITION_STATUS
 e I2C_FAILURES aparecem a cada 5 s mesmo abrindo monitor após o boot.
 
+Desde 2026-10-13, cada relatório também repete `SENSOR_INIT_SUMMARY` com
+`source=boot_snapshot`, `I2C_INIT`, `PCA_INIT` e os resultados `ICM_INIT`/`BMP_INIT`.
+São resultados guardados no boot, não novas tentativas. Se I2C/PCA falhar,
+`SENSOR_INIT_FAILED` identifica o dispositivo e `sensors_skipped=1` indica
+sensores não testados. Com PCA válido, conferir ICM `ok/config_verified`, BMP
+`ok/raw25hz/nvm_valid` e PCA `disable_all`. Enviar um bloco completo desse
+resumo junto de `ACQUISITION_STATUS` para localizar a etapa não aprovada.
+
 Começar com sensores imóveis, conferir produção próxima de 100 pacotes/s,
 I2C, perdas, fila e latências; depois movimento e sessão longa. Preservar log
 com reset=<motivo> se desconectar. Desligamento pode perder a cauda até o último

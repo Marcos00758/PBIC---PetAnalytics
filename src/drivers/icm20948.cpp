@@ -26,6 +26,7 @@ constexpr uint8_t kI2cSlave4RegisterRegister = 0x14;
 constexpr uint8_t kI2cSlave4ControlRegister = 0x15;
 constexpr uint8_t kI2cSlave4DataInRegister = 0x17;
 constexpr uint8_t kI2cSlave4DoneMask = 0x40;
+constexpr uint8_t kI2cAuxiliaryErrorMask = 0x30;  // Lost arbitration or SLV4 NACK.
 constexpr uint8_t kI2cSlaveEnable = 0x80;
 constexpr uint8_t kAuxiliaryReadBit = 0x80;
 constexpr uint8_t kAk09916DataReadyMask = 0x01;
@@ -241,6 +242,9 @@ bool Icm20948::readAuxiliaryRegister(uint8_t slaveAddress,
        ++attempt) {
     uint8_t status = 0;
     if (!readRegister(address_, kI2cMasterStatusRegister, status)) {
+      return false;
+    }
+    if ((status & kI2cAuxiliaryErrorMask) != 0) {
       return false;
     }
     if ((status & kI2cSlave4DoneMask) != 0) {

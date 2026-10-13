@@ -32,6 +32,14 @@ constexpr EventBits_t kRecording = BIT3;
 struct SensorSetup {
   services::SdSessionMetadata metadata{};
   bool ready = false;
+  bool i2cReady = false;
+  bool pcaReady = false;
+  bool pcaDisabled = false;
+  uint8_t icmAddress[data::kIcmCount]{};
+  uint8_t icmWhoAmI[data::kIcmCount]{};
+  uint8_t icmMagWhoAmI[data::kIcmCount]{};
+  bool bmpInitialized[data::kBmpCount]{};
+  uint8_t bmpChipId[data::kBmpCount]{};
 };
 
 // Explicit static storage: internal SRAM, not PSRAM or per-sample allocations.
@@ -66,52 +74,79 @@ bool waitForStartup() {
 
 SensorSetup initializeSensors() {
   SensorSetup result;
-  result.ready = Wire.begin(pins::kI2cSda, pins::kI2cScl, config::kI2cClockHz);
+  result.i2cReady = Wire.begin(pins::kI2cSda, pins::kI2cScl, config::kI2cClockHz);
   Wire.setTimeOut(config::kI2cTimeoutMs);
-  Serial.printf("I2C_INIT ok=%u sda=%u scl=%u hz=%lu timeout_ms=%lu core=%d\n",
-                result.ready, pins::kI2cSda, pins::kI2cScl,
-                static_cast<unsigned long>(config::kI2cClockHz),
-                static_cast<unsigned long>(config::kI2cTimeoutMs), xPortGetCoreID());
-  if (!result.ready || !mux.begin()) {
-    Serial.println("SENSOR_INIT_FAILED device=PCA9548A acquisition_enabled=0");
-    result.ready = false;
-    return result;
-  }
+  result.pcaReady = result.i2cReady && mux.begin();
+  result.ready = result.pcaReady;
+  if (!result.ready) return result;
   for (size_t i = 0; i < data::kIcmCount; ++i) {
     const bool ok = icms[i]->begin();
     result.metadata.icmReady[i] = ok;
     result.metadata.icmAccelConfig[i] = icms[i]->accelConfig();
     result.metadata.icmGyroConfig[i] = icms[i]->gyroConfig();
     result.metadata.icmMagMode[i] = icms[i]->magnetometerMode();
+    result.icmAddress[i] = icms[i]->address();
+    result.icmWhoAmI[i] = icms[i]->whoAmI();
+    result.icmMagWhoAmI[i] = icms[i]->magnetometerWhoAmI();
     result.ready = ok && result.ready;
-    Serial.printf("ICM_INIT index=%u channel=%u ok=%u address=0x%02x "
-                  "who=0x%02x mag_wia2=0x%02x accel_config=0x%02x "
-                  "gyro_config=0x%02x mag_mode=0x%02x config_verified=%u\n", unsigned(i),
-                  icms[i]->muxChannel(), ok, icms[i]->address(),
-                  icms[i]->whoAmI(), icms[i]->magnetometerWhoAmI(),
-                  icms[i]->accelConfig(), icms[i]->gyroConfig(),
-                  icms[i]->magnetometerMode(), ok);
   }
   for (size_t i = 0; i < data::kBmpCount; ++i) {
     const bool ok = bmps[i]->begin();
     const bool sampling = ok && bmps[i]->startRawSampling25Hz();
+    result.bmpInitialized[i] = ok;
+    result.bmpChipId[i] = bmps[i]->chipId();
     result.metadata.bmpReady[i] = sampling;
     result.metadata.bmpAddress[i] = bmps[i]->address();
     result.metadata.bmpNvmValid[i] =
         sampling && bmps[i]->readNvm(result.metadata.bmpNvm[i]);
     result.ready = sampling && result.metadata.bmpNvmValid[i] && result.ready;
+  }
+  result.pcaDisabled = mux.disableAllChannels();
+  result.ready = result.pcaDisabled && result.ready;
+  return result;
+}
+
+// Report the saved boot result only; never read drivers or buses from core 0.
+void reportSensorSetup(const SensorSetup& sensors) {
+  const auto& metadata = sensors.metadata;
+  constexpr uint8_t icmChannels[] = {
+      config::kIcm0Channel, config::kIcm1Channel, config::kIcm2Channel};
+  constexpr uint8_t bmpChannels[] = {config::kBmp0Channel, config::kBmp1Channel};
+  Serial.printf("SENSOR_INIT_SUMMARY firmware=%s source=boot_snapshot sensors_ready=%u\n",
+                config::kFirmwareVersion, sensors.ready);
+  Serial.printf("I2C_INIT ok=%u sda=%u scl=%u hz=%lu timeout_ms=%lu init_core=%u\n",
+                sensors.i2cReady, pins::kI2cSda, pins::kI2cScl,
+                static_cast<unsigned long>(config::kI2cClockHz),
+                static_cast<unsigned long>(config::kI2cTimeoutMs), config::kAcquisitionCore);
+  Serial.printf("PCA_INIT address=0x%02x ok=%u final_disable_attempted=%u disable_all=%u\n",
+                config::kPca9548aAddress, sensors.pcaReady, sensors.pcaReady,
+                sensors.pcaDisabled);
+  if (!sensors.pcaReady) {
+    Serial.printf("SENSOR_INIT_FAILED device=%s acquisition_enabled=0 sensors_skipped=1\n",
+                  sensors.i2cReady ? "PCA9548A" : "I2C");
+    return;
+  }
+  for (size_t i = 0; i < data::kIcmCount; ++i) {
+    Serial.printf("ICM_INIT index=%u channel=%u ok=%u address=0x%02x "
+                  "who=0x%02x mag_wia2=0x%02x accel_config=0x%02x "
+                  "gyro_config=0x%02x mag_mode=0x%02x config_verified=%u\n",
+                  unsigned(i), icmChannels[i], metadata.icmReady[i], sensors.icmAddress[i],
+                  sensors.icmWhoAmI[i], sensors.icmMagWhoAmI[i],
+                  metadata.icmAccelConfig[i], metadata.icmGyroConfig[i],
+                  metadata.icmMagMode[i], metadata.icmReady[i]);
+  }
+  for (size_t i = 0; i < data::kBmpCount; ++i) {
     Serial.printf("BMP_INIT index=%u channel=%u ok=%u address=0x%02x "
                   "chip_id=0x%02x raw25hz=%u nvm_valid=%u\n", unsigned(i),
-                  bmps[i]->muxChannel(), ok, bmps[i]->address(),
-                  bmps[i]->chipId(), sampling, result.metadata.bmpNvmValid[i]);
+                  bmpChannels[i], sensors.bmpInitialized[i], metadata.bmpAddress[i],
+                  sensors.bmpChipId[i], metadata.bmpReady[i], metadata.bmpNvmValid[i]);
   }
-  if (!mux.disableAllChannels()) result.ready = false;
-  return result;
 }
 
 void producer(void*) {
   if (!waitForStartup()) { vTaskDelete(nullptr); return; }
   const SensorSetup sensors = initializeSensors();
+  reportSensorSetup(sensors);
   xQueueOverwrite(sensorSetups, &sensors);
   if (!sensors.ready) { vTaskDelete(nullptr); return; }
   // SD session setup precedes acquisition. No packets accumulate during setup.
@@ -219,6 +254,7 @@ void consumer(void*) {
     }
     logger.updateFailureIndicator();
     if (millis() - lastReport >= config::kRuntimeReportMs) {
+      reportSensorSetup(sensors);
       report(counters, discarded, sensors.ready);
       lastReport = millis();
     }

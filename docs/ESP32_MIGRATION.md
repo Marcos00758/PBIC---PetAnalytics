@@ -225,6 +225,9 @@ o defeito pode ser conferido no
 Validar na placa três `ICM_INIT` com `ok=1 config_verified=1`, registradores
 0x04/0x06/0x04 e os mesmos valores em meta.txt. Taxas físicas não foram medidas.
 Alias acima de 50 Hz permanece possível; nenhum filtro foi acrescentado.
+Verificação desta correção: builds Teensy/ESP32 aprovados e 43 testes host
+aprovados (estes não exercitam o driver físico). ESP32: 51.380 bytes de RAM
+estática e 346.197 bytes de flash. Sem upload; readback na montagem pendente.
 
 **Atualização em 2026-10-10:** o usuário substituiu ESP32 e módulo SD, mantendo
 FH4R2 e pinos. Houve montagem/recuperação de prefixo, mas timeout de escrita
