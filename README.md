@@ -98,6 +98,13 @@ sensores não testados. Com PCA válido, conferir ICM `ok/config_verified`, BMP
 `ok/raw25hz/nvm_valid` e PCA `disable_all`. Enviar um bloco completo desse
 resumo junto de `ACQUISITION_STATUS` para localizar a etapa não aprovada.
 
+Contagem de espaço livre (correção de 2026-10-13): `SD_FREE_SCAN phase=begin/end`
+identifica as consultas do boot e de preparação da sessão. Durante cada consulta,
+a tarefa SD compartilha a prioridade 0 com IDLE0; ao terminar restaura sua
+prioridade anterior (normalmente 2). A varredura pode levar vários segundos.
+No teste, conferir conclusão das duas consultas, `SD_CAPACITY`,
+`ACQUISITION_START recording=1` e status periódico sem reset por watchdog.
+
 Começar com sensores imóveis, conferir produção próxima de 100 pacotes/s,
 I2C, perdas, fila e latências; depois movimento e sessão longa. Preservar log
 com reset=<motivo> se desconectar. Desligamento pode perder a cauda até o último

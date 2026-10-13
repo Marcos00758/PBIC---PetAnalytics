@@ -72,6 +72,45 @@ Gravação exige reboot para retomar; SPI é encerrado após o atraso previsto,
 sem aplicar o LED Teensy ao WS2812. Journal delimita dados confirmados.
 Depois da falha, contadores novos podem existir só no serial.
 
+### Contagem de espaço livre e revisão de chamadas longas — 2026-10-13
+
+Backtrace do ELF `7b6ed35c22c58dfe` localizou o watchdog de IDLE0 em
+`SdLogger::beginCard()` → `freeClusterCount()` → leitura SPI da FAT.
+A mesma consulta ocorre em `hasSpaceForNextSession()`. Ambas passam agora
+por `countFreeClusters()`: no S3, salva a prioridade da tarefa chamadora,
+reduz para `tskIDLE_PRIORITY` (0) durante a chamada e restaura ao retornar,
+inclusive quando a biblioteca indica erro. Contagem, validação de capacidade,
+reserva de espaço e suporte FAT/exFAT permanecem na SdFat.
+
+A configuração instalada usa preempção e time slicing; o build exige ambas.
+IDLE0 pode executar entre ticks enquanto a contagem prossegue no núcleo 0.
+Prioridade normal de armazenamento continua 2; aquisição permanece no núcleo 1.
+Watchdog, biblioteca instalada e driver SPI não foram alterados. A função registra
+`SD_FREE_SCAN phase=begin/end`, duração em ms e prioridade antes/depois.
+Pode aumentar o tempo de inicialização; não garante prazo máximo ou recuperação
+de uma transferência SPI que nunca termine. Efeito real depende do ensaio físico.
+Referências: [escalonamento SMP](https://docs.espressif.com/projects/esp-idf/en/v4.4.7/esp32s3/api-guides/freertos-smp.html)
+e [watchdog](https://docs.espressif.com/projects/esp-idf/en/v4.4.7/esp32s3/api-reference/system/wdts.html).
+
+Revisão limitada de outras operações, **sem alterações nesta etapa**:
+
+| Operação | Resultado da investigação |
+|---|---|
+| `openAndPreallocateDataFiles()` / `preAllocate()` | Busca de clusters contíguos pode percorrer grande parte da FAT sem pausas explícitas. Risco com fragmentação ou pouco espaço; não apareceu no backtrace fornecido. |
+| `chooseSessionNumber()` | Laço de busca de pastas existentes sem pausa explícita; tempo cresce com as colisões e leituras de diretório. |
+| `sync`, `truncate`, metadados/journal | Chamadas síncronas podem agrupar operações SD. O `vTaskDelay(1)` do consumidor só ocorre após elas; latências precisam de medição. |
+| Teste SD independente | Ensaio máximo e verificação usam `yield()`, que não garante execução de tarefas de prioridade inferior; o ensaio cadenciado usa `delay(1)` enquanto espera. Revisar em etapa própria se ocorrer watchdog nesse ambiente. |
+| Inicialização ICM/BMP | Polling auxiliar próprio tem limite de tentativas; resets Adafruit usam `delay`, cedendo CPU, mas alguns laços não têm prazo global. Não reproduzem diretamente a varredura contínua identificada aqui. |
+
+O transporte SPI instalado também usa transferências byte a byte no caminho
+identificado pelo backtrace, aumentando o custo das leituras. Otimização de SPI
+e adaptação das operações listadas ficam para tarefas separadas, com medição.
+
+Verificação: builds `esp32s3_acquisition` e `teensy40` aprovados;
+`git diff --check` sem erros. No S3: 51.396 bytes de RAM estática e 346.833
+bytes de flash. Sem upload; ausência de watchdog durante a varredura ainda
+precisa ser confirmada na placa com `SD_FREE_SCAN phase=end` nas duas consultas.
+
 Áudio está excluído das fontes e dependências. Tipos históricos foram unificados
 em `data/audio_types.h`; S3 não instancia captura, I2S ou buffer PCM de 32 KiB,
 e rejeita sessão pedindo áudio. Retomada exige etapa própria. A seção planejada

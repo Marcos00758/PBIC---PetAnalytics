@@ -145,6 +145,7 @@ class SdLogger {
   };
 
   bool verifyReadWrite();
+  uint32_t countFreeClusters();
   bool chooseSessionNumber();
   bool persistSessionNumber();
   bool writeMetadata(const SdSessionMetadata& metadata);

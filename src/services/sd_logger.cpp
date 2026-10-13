@@ -8,6 +8,8 @@
 #include "config/pins.h"
 #include "utils/crc8.h"
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include "config/esp32_runtime.h"
 #endif
 
@@ -100,7 +102,7 @@ bool SdLogger::beginCard() {
 
   const uint32_t bytesPerCluster = filesystem().bytesPerCluster();
   const uint32_t clusterCount = filesystem().clusterCount();
-  const uint32_t freeClusterCount = filesystem().freeClusterCount();
+  const uint32_t freeClusterCount = countFreeClusters();
   if (bytesPerCluster == 0 || clusterCount == 0 ||
       freeClusterCount > clusterCount) {
     confirmCardFailure("capacity_query");
@@ -496,6 +498,28 @@ bool SdLogger::verifyReadWrite() {
          memcmp(received, kTestPattern, sizeof(received)) == 0;
 }
 
+uint32_t SdLogger::countFreeClusters() {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+  static_assert(configUSE_PREEMPTION && configUSE_TIME_SLICING,
+                "SD capacity scan requires preemptive time slicing");
+  const UBaseType_t previousPriority = uxTaskPriorityGet(nullptr);
+  Serial.printf("SD_FREE_SCAN phase=begin priority=%u scan_priority=%u\n",
+                unsigned(previousPriority), unsigned(tskIDLE_PRIORITY));
+  const uint32_t startedMs = millis();
+  // SdFat scans synchronously. Share core 0 with IDLE0 during this call only.
+  vTaskPrioritySet(nullptr, tskIDLE_PRIORITY);
+  const uint32_t count = filesystem().freeClusterCount();
+  vTaskPrioritySet(nullptr, previousPriority);  // Restore even on a count error.
+  Serial.printf("SD_FREE_SCAN phase=end clusters=%lu elapsed_ms=%lu priority=%u\n",
+                static_cast<unsigned long>(count),
+                static_cast<unsigned long>(millis() - startedMs),
+                unsigned(uxTaskPriorityGet(nullptr)));
+  return count;
+#else
+  return filesystem().freeClusterCount();
+#endif
+}
+
 bool SdLogger::chooseSessionNumber() {
   uint32_t lastSession = 0;
   FsFile counter = filesystem().open(kSessionPath, O_RDONLY);
@@ -729,7 +753,7 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
 bool SdLogger::hasSpaceForNextSession() {
   const uint32_t bytesPerCluster = filesystem().bytesPerCluster();
   const uint32_t clusterCount = filesystem().clusterCount();
-  const uint32_t freeClusterCount = filesystem().freeClusterCount();
+  const uint32_t freeClusterCount = countFreeClusters();
   if (bytesPerCluster == 0 || clusterCount == 0 ||
       freeClusterCount > clusterCount) {
     return false;
