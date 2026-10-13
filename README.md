@@ -120,6 +120,13 @@ desligamentos e crescimento após dez minutos precisam de ensaio físico;
 arquivos acima de 4 GiB dependem de exFAT e não estão validados. Não apagar
 sessões para repetir testes. [Arquitetura](docs/ARCHITECTURE.md).
 
+## Planejamento da avaliação dos sensores
+
+Planos separados em `python/avaliacao/`: [ICM](python/avaliacao/ICM.md)
+e [BMP](python/avaliacao/BMP.md). Preveem análise das capturas do SD no
+computador, reaproveitando o parser, sem filtros ou alteração dos dados crus.
+Os scripts `avaliar_icm.py` e `avaliar_bmp.py` ainda não foram implementados.
+
 ## Aplicação Teensy da main — referência durante a migração
 
 As instruções abaixo descrevem a aplicação Teensy ainda não portada. Para
