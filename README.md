@@ -40,6 +40,13 @@ para o firmware Teensy da main; a cópia completa da última etapa de apresenta�
 está em [legacy/teensy40/SNAPSHOT.md](legacy/teensy40/SNAPSHOT.md).
 Decisões e próximos passos: [ESP32_MIGRATION.md](docs/ESP32_MIGRATION.md).
 
+## Teste independente ESP32 + PCA9548A
+
+Ambiente `esp32s3_pca_test`: consulta `0x70`–`0x77` a 100/400 kHz e registra
+retornos I2C da consulta e da escrita `0x00` nos endereços que responderem.
+Inicia automaticamente e repete a cada 5 s, sem SD ou coleta de sensores.
+Comandos e interpretação: [docs/PCA_TEST.md](docs/PCA_TEST.md).
+
 ## Teste independente ESP32 + SD
 
 O ambiente `esp32s3_sd_test` usa SdFat 2.3.1 e a montagem confirmada

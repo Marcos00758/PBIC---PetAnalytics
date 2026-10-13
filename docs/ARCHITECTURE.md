@@ -8,6 +8,12 @@ preparação sem escrita; `esp32s3_sd_test` continua isolado. Teensy mantém sua
 entrada original, excluindo `esp32/`. Aprovação física continua pendente:
 o ensaio SD novo abortou por timeout, conforme [SD_TEST.md](SD_TEST.md).
 
+`esp32s3_pca_test` é outro ambiente isolado (2026-10-13), compilando apenas
+`diagnostics/esp32s3_pca_test.cpp` e Wire. Consulta `0x70`–`0x77` e escreve
+`0x00` nos endereços que responderem, comparando 100/400 kHz a cada 5 s.
+Não usa os drivers de aquisição nem SdFat e não habilita canais ou sensores.
+Detalhes em [PCA_TEST.md](PCA_TEST.md); o ambiente padrão permanece preparação.
+
 `pbic-sensors`, prioridade 3, núcleo 1, é dono exclusivo de Wire/PCA9548A e
 cinco sensores, inclusive inicialização. I2C GPIO1/2 a 400 kHz, timeout 10 ms.
 Todos os sensores e as duas NVM precisam estar válidos para iniciar aquisição.
