@@ -1,0 +1,64 @@
+{
+  "source": "Bosch bmp3.c v2.0.1 bundled with Adafruit BMP3XX Library",
+  "source_url": "https://github.com/adafruit/Adafruit_BMP3XX/blob/master/bmp3.c",
+  "source_sha256": "2513b3b64ad0acd66e45292e577c729435d86cb63764fdca2c51d1760657758e",
+  "method": "Compiled unmodified Bosch C source with GCC -O0, double precision; parse_calib_data then compensate_temperature and compensate_pressure",
+  "vectors": [
+    {
+      "nvm": "116D394CF9501C49160601514A685C03FAD30E06F5",
+      "pressure_raw": 6582528,
+      "temperature_raw": 8472576,
+      "pressure_pa": 101115.67928487419,
+      "temperature_c": 24.031807022402063
+    },
+    {
+      "nvm": "116D394CF9501C49160601514A685C03FAD30E06F5",
+      "pressure_raw": 6391296,
+      "temperature_raw": 8443648,
+      "pressure_pa": 102717.68330933238,
+      "temperature_c": 23.507986784912646
+    },
+    {
+      "nvm": "116D394CF9501C49160601514A685C03FAD30E06F5",
+      "pressure_raw": 6000000,
+      "temperature_raw": 8000000,
+      "pressure_pa": 104232.15147896908,
+      "temperature_c": 15.469317315379158
+    },
+    {
+      "nvm": "116D394CF9501C49160601514A685C03FAD30E06F5",
+      "pressure_raw": 6500000,
+      "temperature_raw": 8500000,
+      "pressure_pa": 101982.31649248005,
+      "temperature_c": 24.52835481064176
+    },
+    {
+      "nvm": "9A6C4D4CF99D1CBD1606015949E25903FAB60E06F5",
+      "pressure_raw": 6582528,
+      "temperature_raw": 8472576,
+      "pressure_pa": 99535.86165473115,
+      "temperature_c": 24.608639487065375
+    },
+    {
+      "nvm": "9A6C4D4CF99D1CBD1606015949E25903FAB60E06F5",
+      "pressure_raw": 6391296,
+      "temperature_raw": 8443648,
+      "pressure_pa": 101129.65741342309,
+      "temperature_c": 24.0843242558185
+    },
+    {
+      "nvm": "9A6C4D4CF99D1CBD1606015949E25903FAB60E06F5",
+      "pressure_raw": 6000000,
+      "temperature_raw": 8000000,
+      "pressure_pa": 102687.02969418633,
+      "temperature_c": 16.038063421845436
+    },
+    {
+      "nvm": "9A6C4D4CF99D1CBD1606015949E25903FAB60E06F5",
+      "pressure_raw": 6500000,
+      "temperature_raw": 8500000,
+      "pressure_pa": 100392.84182209369,
+      "temperature_c": 25.105656533767615
+    }
+  ]
+}

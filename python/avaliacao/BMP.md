@@ -1,8 +1,51 @@
-# Plano de avaliação dos BMP390
+# Avaliação dos BMP390
 
-Planejamento de 2026-10-13. Futuro arquivo: `avaliar_bmp.py`, nesta pasta.
-Este documento não implementa nem executa a avaliação. Abrange BMP0/1,
+Relatório textual implementado em 2026-10-13: [avaliar_bmp.py](avaliar_bmp.py).
+Abrange BMP0/1,
 nos canais PCA 7/3, e a investigação da altura que anteriormente subia em repouso.
+
+## Como executar
+
+Na raiz do projeto, avaliar toda a sessão copiada do SD:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001
+```
+
+Trecho de repouso conhecido, elevação e retorno da S001, respectivamente:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001 --start-s 10 --end-s 50 --rest
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001 --start-s 240 --end-s 250 --reference-s 230 235
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001 --start-s 265 --end-s 309 --reference-s 230 235 --rest
+```
+
+Os tempos são relativos ao primeiro pacote válido, com fim exclusivo. Essas
+janelas foram identificadas na S001; não são fases detectadas automaticamente
+e não devem ser copiadas para outra captura sem conferir o protocolo.
+`--rest` só identifica a interpretação da tendência; não detecta repouso nem
+remove deriva. Todas as execuções verificam integridade do prefixo inteiro.
+
+Sem `--reference-s INICIO FIM`, altura fica indisponível. Cada BMP usa a média
+de sua pressão nesse intervalo como referência fixa. A referência precisa de
+pelo menos dois pacotes compensáveis, nenhum pacote inutilizável nesse sensor
+e cobertura completa do intervalo; uma
+captura com CRC/sequência/timestamps inconsistentes não produz altura.
+Janelas de subida e retorno devem usar a mesma referência.
+
+A fórmula é `h = R*T/g * ln(P_ref/P)`, R=287,05 J/(kg·K), g=9,80665 m/s².
+T é fixa: média da temperatura do próprio sensor no intervalo de referência,
+como estimativa da temperatura do ar. Se houver medição independente, fornecer
+`--air-temperature-c 24`, substituindo 24 pelo valor medido. O relatório registra
+a fonte de temperatura, pressão de referência e coeficiente da conversão.
+Não há altitude absoluta, integração sucessiva, fusão ou referência móvel.
+
+Saída apenas no terminal; arquivos originais são preservados. Código de saída
+`0`: integridade passou e pelo menos dois pacotes selecionados, sem valores
+inválidos nos sensores da janela; NVM ausente permite diagnóstico cru com
+`sensor_data_quality=raw_only`. Código `1`: captura/amostras insuficientes ou
+valores crus/físicos inválidos. Código `2`: entrada, checkpoint ou parâmetros
+inválidos. Nenhum desses códigos aprova automaticamente a precisão física.
 
 ## Entrada e regras
 
@@ -13,15 +56,18 @@ nos canais PCA 7/3, e a investigação da altura que anteriormente subia em repo
   ou cauda não confirmada como dados experimentais.
 - Conferir identificação, taxa/configuração declarada e os 21 bytes NVM
   individuais de cada BMP. Não compartilhar coeficientes entre sensores.
+  O script exige `bmpN_nvm_valid=1`; NVM ausente, malformada, toda zero ou toda
+  FF deixa a conversão desse sensor indisponível. Informa endereço, canal e
+  prontidão declarados; não mede nem confirma a configuração de hardware.
 - Contagens são dados crus de 24 bits; não atribuir Pa/°C antes da compensação.
   O sentinela `0xFFFFFFFF` representa ausência de leitura válida.
 - Sem filtros, suavização, integração da altura, correção automática de deriva
   ou alteração dos arquivos originais. Conversão de unidades e compensação
   do fabricante servem à avaliação e não substituem a captura crua.
 
-## O que o script avaliará
+## O que o script avalia
 
-| Parte | Avaliação prevista |
+| Parte | Relatório implementado |
 |---|---|
 | Integridade da captura | CRC, lacunas, cauda parcial, duração e temporização dos pacotes, aproveitando o parser. |
 | Dados crus | Faixas, sentinelas, mínimo/máximo, dispersão, mudanças observadas e trechos constantes de pressão/temperatura por BMP. |
@@ -29,6 +75,17 @@ nos canais PCA 7/3, e a investigação da altura que anteriormente subia em repo
 | Pressão e temperatura | Comparar os dois sensores no mesmo ambiente, quantificar diferenças, dispersão e evolução durante repouso/aquecimento. |
 | Altura relativa | Derivar de pressão compensada com fórmula e referência de pressão explicitadas e fixas durante o ensaio; verificar sinal, repetibilidade e retorno ao nível inicial. |
 | Deriva | Medir tendências de pressão, temperatura e altura durante repouso; investigar unidades, sinais, coeficientes e referência antes de atribuir o efeito ao software. |
+
+Mínimo, máximo, média e desvio populacional usam todos os pacotes válidos da
+janela, incluindo cache, sem deduplicação. A tendência é regressão linear
+descritiva, expressa em unidades por minuto, sem alterar a série. Comparação
+entre BMPs é assinada: BMP0 menos BMP1. Contadores de erro se referem à janela
+selecionada; CRC e sequência abrangem o prefixo completo.
+
+Pares com sentinela ou contagem fora de 24 bits são contados separadamente e
+excluídos das métricas válidas. Compensações não finitas ou fora da faixa de
+operação de 30000–125000 Pa / −40–85 °C também são contadas e excluídas, sem
+limitar artificialmente o valor. Ausência de erros não certifica o sensor.
 
 Sem NVM utilizável, continuar apenas com diagnóstico cru e marcar pressão,
 temperatura física e altura como indisponíveis. Não inventar coeficientes.
@@ -60,9 +117,10 @@ para aprovar automaticamente a configuração crua atual.
 
 ## Implementação por partes
 
-1. Versão mínima: validação, diagnóstico cru e NVM por BMP.
-2. Compensação em Pa/°C, comparação e métricas de repouso.
-3. Altura relativa, investigação de deriva e gráficos, se necessários.
+1. Implementado: validação, diagnóstico cru e NVM por BMP.
+2. Implementado: compensação em Pa/°C, comparação e métricas de repouso.
+3. Implementado: altura relativa e tendências com referência explícita.
+   Gráficos continuam opcionais e não fazem parte deste script.
 
 Funções curtas para leitura, compensação, métricas e apresentação. Reaproveitar
 `Bmp390Calibration` e `load_bmp390_calibrations` do parser; validar com valores
@@ -71,8 +129,19 @@ Analisar todos os pacotes válidos, sem exigir carregar a sessão completa em RA
 Versão mínima sem dependências novas; resultados futuros em
 `data/avaliacao/<ensaio>/bmp/`, separados da captura original.
 
-Testes futuros: NVM ausente/inválida, sentinelas, compensação conhecida,
-repetições de cache, pressão constante, elevação e retorno, e cauda parcial.
+Testes automatizados cobrem NVM ausente/inválida, sentinelas, valores fora de
+24 bits/faixa física, cache, pressão constante, tendências, referência fixa,
+elevação/retorno, CRC, rollover e cauda parcial. A compensação é comparada com
+oito vetores gerados compilando o driver C Bosch v2.0.1 instalado, sem usar a
+fórmula Python para gerar os resultados esperados. A fixture
+`python/tests/fixtures/bmp390_bosch.json` registra fonte, hash e método.
+Tolerâncias numéricas: 0,0001 Pa e 1e-9 °C; não são tolerâncias dos sensores.
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B -m unittest discover -s python/tests -p test_avaliar_bmp.py -v
+```
+
+Validação experimental de exatidão, repetibilidade e deriva permanece pendente.
 Conclusão deve separar integridade do transporte, validade da conversão e
 adequação do barômetro à resolução de movimento necessária.
 
@@ -80,4 +149,4 @@ Referências: [datasheet Bosch BMP390](https://www.bosch-sensortec.com/media/bos
 e [driver oficial BMP3](https://github.com/boschsensortec/BMP3_SensorAPI).
 
 Dados/relatórios em `data/` são ignorados pelo Git e precisam de cópia de segurança.
-Este plano não altera firmware, formato dos pacotes ou arquitetura de aquisição.
+Esta ferramenta não altera firmware, formato dos pacotes ou arquitetura de aquisição.

@@ -120,12 +120,30 @@ desligamentos e crescimento após dez minutos precisam de ensaio físico;
 arquivos acima de 4 GiB dependem de exFAT e não estão validados. Não apagar
 sessões para repetir testes. [Arquitetura](docs/ARCHITECTURE.md).
 
-## Planejamento da avaliação dos sensores
+## Avaliação dos sensores
 
-Planos separados em `python/avaliacao/`: [ICM](python/avaliacao/ICM.md)
-e [BMP](python/avaliacao/BMP.md). Preveem análise das capturas do SD no
-computador, reaproveitando o parser, sem filtros ou alteração dos dados crus.
-Os scripts `avaliar_icm.py` e `avaliar_bmp.py` ainda não foram implementados.
+Avaliação dos [ICM](python/avaliacao/ICM.md) implementada em
+`python/avaliacao/avaliar_icm.py`: valida o prefixo confirmado da captura SD,
+relata acelerômetros/giroscópios/magnetômetros e compara normas dos três ICMs.
+Executa no computador, sem filtros ou alteração dos dados crus:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_icm.py data/S002
+```
+
+Há seleção de janela e declaração explícita de repouso; veja as instruções ICM
+para interpretar resultados e limites. A avaliação [BMP](python/avaliacao/BMP.md)
+também está implementada: dados crus, NVM individual, pressão/temperatura,
+comparação, tendências e altura relativa com referência fixa explícita:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001
+& ".\.venv\Scripts\python.exe" -B python/avaliacao/avaliar_bmp.py data/S001 --start-s 240 --end-s 250 --reference-s 230 235
+```
+
+Sem referência, altura fica indisponível. Ambos os relatórios avaliam somente
+o prefixo confirmado e preservam os arquivos originais. Passar na integridade
+não comprova que o ensaio inteiro foi gravado nem certifica exatidão física.
 
 ## Aplicação Teensy da main — referência durante a migração
 

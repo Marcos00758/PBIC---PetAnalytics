@@ -371,8 +371,8 @@ def load_session_metadata(input_path: Path) -> dict[str, str]:
     return load_key_value_file(input_path.parent / "meta.txt")
 
 
-def load_session_journal(input_path: Path) -> dict[str, str]:
-    """Load the newest valid binary checkpoint, with legacy text fallback."""
+def load_session_journal(input_path: Path, *, binary_only: bool = False) -> dict[str, str]:
+    """Load the newest valid checkpoint; binary_only disables legacy text fallback."""
     session = input_path if input_path.is_dir() else input_path.parent
     binary_path = session / "journal.bin"
     latest: dict[str, str] = {}
@@ -397,7 +397,7 @@ def load_session_journal(input_path: Path) -> dict[str, str]:
                 }
         if latest:
             return latest
-    return load_key_value_file(session / "journal.txt")
+    return {} if binary_only else load_key_value_file(session / "journal.txt")
 
 
 def load_session_status(input_path: Path) -> dict[str, str]:
