@@ -33,6 +33,17 @@ Os divisores 10 permanecem escritos, mas não determinam essas taxas em bypass.
 Leitura pelo ESP32 continua a 100 Hz: pode haver aliasing acima de 50 Hz.
 Não há interpolação, média ou filtro de software para evitar esse efeito.
 
+Firmware S3 `0.6.2` (2026-10-29): o BMP entra em sleep antes da configuração
+explícita OSR=0x00, ODR=0x03, CONFIG=0x00 e PWR_CTRL=0x33 (normal, pressão e
+temperatura habilitadas). Após 10 ms, o driver relê os quatro registradores e
+ERR_REG (0x02), confere os campos definidos e exige ausência de fatal_err,
+cmd_err e conf_err. Escrita/leitura falha ou divergência impede iniciar a coleta.
+O resultado é copiado para o diagnóstico de boot e `meta.txt`; o consumidor
+não acessa o I2C para repetir o resumo. Filtros continuam desligados. A verificação
+é inicial: não monitora mudanças de configuração em execução nem comprova que
+cada leitura posterior seja uma conversão nova. DRDY/idade do cache permanecem
+pendentes de uma etapa própria; a configuração verificada não corrige deriva.
+
 `pbic-sd`, prioridade 2, núcleo 0, recebe o resultado de setup por cópia, monta
 SdFat com SPIClass FSPI próprio e `SHARED_SPI | USER_SPI_BEGIN`, cria sessão e
 libera aquisição. Só essa tarefa chama o logger, inclusive enqueue/manutenção.

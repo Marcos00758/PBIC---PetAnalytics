@@ -95,6 +95,7 @@ SensorSetup initializeSensors() {
     const bool sampling = ok && bmps[i]->startRawSampling25Hz();
     result.bmpInitialized[i] = ok;
     result.bmpChipId[i] = bmps[i]->chipId();
+    result.metadata.bmpConfiguration[i] = bmps[i]->configuration();
     result.metadata.bmpReady[i] = sampling;
     result.metadata.bmpAddress[i] = bmps[i]->address();
     result.metadata.bmpNvmValid[i] =
@@ -136,10 +137,15 @@ void reportSensorSetup(const SensorSetup& sensors) {
                   metadata.icmMagMode[i], metadata.icmReady[i]);
   }
   for (size_t i = 0; i < data::kBmpCount; ++i) {
+    const auto& cfg = metadata.bmpConfiguration[i];
     Serial.printf("BMP_INIT index=%u channel=%u ok=%u address=0x%02x "
-                  "chip_id=0x%02x raw25hz=%u nvm_valid=%u\n", unsigned(i),
+                  "chip_id=0x%02x raw25hz=%u nvm_valid=%u "
+                  "readback_ok=%u config_verified=%u pwr_ctrl=0x%02x "
+                  "osr=0x%02x odr=0x%02x iir_config=0x%02x error_reg=0x%02x\n", unsigned(i),
                   bmpChannels[i], sensors.bmpInitialized[i], metadata.bmpAddress[i],
-                  sensors.bmpChipId[i], metadata.bmpReady[i], metadata.bmpNvmValid[i]);
+                  sensors.bmpChipId[i], metadata.bmpReady[i], metadata.bmpNvmValid[i],
+                  cfg.readbackOk, cfg.verified, cfg.powerControl, cfg.oversampling,
+                  cfg.outputDataRate, cfg.iirConfig, cfg.error);
   }
 }
 

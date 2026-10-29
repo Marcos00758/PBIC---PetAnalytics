@@ -89,6 +89,31 @@ ensaio deve informar seus intervalos. Registrar posição relativa dos três ICM
 e presença de metais/ímãs. Avaliar adequação ao movimento que a pesquisa pretende
 medir; estabelecer tolerâncias antes de aprovar, sem números arbitrários.
 
+## Investigação dos picos da S003 — 2026-10-29
+
+Revisão sem alteração do código ICM: nove valores de aceleração/giroscópio
+atingiram exatamente -32768/+32767; outro gyro chegou a 32377. Vários picos
+de gyro possuem vizinhos de centenas de graus/s e mudança simultânea da norma
+da aceleração. Em 65,22-65,23 s, ICM2 gyro Z atingiu os dois extremos; em
+722,78 s, ICM0 acel Y atingiu -8 g e a norma aproximadamente 9,71 g, com gyro
+da mesma rodada próximo de 359 graus/s. São indícios compatíveis com movimento,
+impacto/vibração e saturação, não comprovação de causa mecânica.
+
+Hipóteses e discriminação: primeiro observar fixação/cabos e sincronizar vídeo
+com dados crus; comparar movimento suave, repouso e movimento representativo.
+DLPF em bypass com leitura host de 100 Hz pode admitir aliasing de vibrações
+acima de 50 Hz. Avaliar aquisição diagnóstica mais rápida e, se autorizada,
+limitação de banda antes da redução de taxa. Filtro após a aquisição não recupera
+picos saturados nem remove aliasing já ocorrido. Se houver saturação real do
+acelerômetro, avaliar ±16 g; o gyro já está na maior faixa, ±2000 graus/s.
+Persistindo extremos em repouso sem perturbação, investigar alimentação,
+comunicação, atualização dos registradores e integridade antes do CRC do pacote.
+
+A decodificação big-endian e o bloco de 12 bytes correspondem aos registradores
+de acel/gyro. Não foi identificada inversão sistemática de bytes que explique
+isoladamente os picos. O congelamento magnético do ICM1 observado na S003 é
+uma pendência separada; nenhum filtro deve mascarar dados antigos ou inválidos.
+
 ## Implementação por partes
 
 1. Implementado: entrada, validação da captura e relatório textual de acel/gyro.

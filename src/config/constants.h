@@ -20,7 +20,7 @@ constexpr uint8_t kMicrophoneBitsPerSample = 16;
 constexpr uint32_t kI2cClockHz = 400000;
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-constexpr char kFirmwareVersion[] = "0.6.1";
+constexpr char kFirmwareVersion[] = "0.6.2";
 static_assert(!kMicrophoneDiagnosticEnabled && !kAudioSdDiagnosticEnabled &&
                   !kMicrophoneRecordingEnabled && !kUsbBinaryStreamEnabled,
               "ESP32 acquisition currently supports SD sensors only");

@@ -15,6 +15,16 @@ struct Bmp390RawSample {
   uint32_t temperature;
 };
 
+struct Bmp390Configuration {
+  uint8_t powerControl = 0;
+  uint8_t oversampling = 0;
+  uint8_t outputDataRate = 0;
+  uint8_t iirConfig = 0;
+  uint8_t error = 0;
+  bool readbackOk = false;
+  bool verified = false;
+};
+
 class Bmp390 {
  public:
   Bmp390(Pca9548a& mux, TwoWire& wire, uint8_t muxChannel);
@@ -28,6 +38,7 @@ class Bmp390 {
   uint8_t muxChannel() const { return muxChannel_; }
   uint8_t address() const { return address_; }
   uint8_t chipId() const { return chipId_; }
+  const Bmp390Configuration& configuration() const { return configuration_; }
 
  private:
   bool addressResponds(uint8_t address);
@@ -41,6 +52,7 @@ class Bmp390 {
   uint8_t address_ = 0;
   uint8_t chipId_ = 0;
   bool initialized_ = false;
+  Bmp390Configuration configuration_{};
 };
 
 }  // namespace pet::drivers

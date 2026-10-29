@@ -27,6 +27,7 @@ struct SdSessionMetadata {
   uint8_t icmAccelConfig[data::kIcmCount]{};
   uint8_t icmGyroConfig[data::kIcmCount]{};
   uint8_t icmMagMode[data::kIcmCount]{};
+  drivers::Bmp390Configuration bmpConfiguration[data::kBmpCount]{};
 #endif
   bool bmpReady[data::kBmpCount] = {false, false};
   bool bmpNvmValid[data::kBmpCount] = {false, false};

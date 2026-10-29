@@ -72,20 +72,32 @@ Bateria de lítio → conversor regulado para 5 V → USB-C do ESP32
                                        PCA9548A, sensores e módulo SD
 ```
 
-O microSD será alimentado pelo próprio ESP32, conforme informado. Módulo
-identificado pelo usuário como **"Modulo Adaptador Cartão Micro Sd Tf Card
-Arduino Esp32 Pic"**, no
+Na montagem anterior, o módulo microSD foi identificado pelo usuário como
+**"Modulo Adaptador Cartão Micro Sd Tf Card Arduino Esp32 Pic"**, no
 [anúncio Mercado Livre MLBU2296492711 / MLB3617781629](https://www.mercadolivre.com.br/modulo-adaptador-cartao-micro-sd-tf-card-arduino-esp32-pic/up/MLBU2296492711?pdp_filters=item_id%3AMLB3617781629).
 
 A consulta ao anúncio retornou **403 Forbidden** em 2026-10-05. O nome é uma
 denominação comercial genérica, sem identificação confirmada do fabricante,
 revisão da placa, regulador ou conversor de nível. Posteriormente, o usuário
 **confirmou VCC do módulo em 3,3 V, alimentado pela saída 3V3 do ESP32**, e
-informou que as conexões de hardware estão concluídas. A pinagem SPI
-CS GPIO4, MOSI GPIO5, MISO GPIO6 e SCK GPIO7 permanece confirmada, com terra comum. A tensão deixou de ser
-uma dúvida de montagem; estabilidade durante escrita e picos de corrente
-ainda dependem do ensaio físico. O ambiente `esp32s3_sd_test` usa essa montagem,
-sem acionar sensores, áudio ou o LED RGB; roteiro em [SD_TEST.md](SD_TEST.md).
+informou que as conexões de hardware estavam concluídas. Esse registro de
+3,3 V se refere ao módulo anterior.
+
+**Montagem atual, informada em 2026-10-21 e com alimentação confirmada em
+2026-10-27:** módulo leitor **HW-125 com VCC ligado em 5 V**, mantendo
+CS GPIO4, MOSI GPIO5, MISO GPIO6 e SCK GPIO7, com terra comum e sinais SPI do
+ESP32 em 3,3 V. A revisão/circuito do HW-125 e a origem física dos 5 V não
+foram verificados independentemente; não aplicar 5 V aos GPIOs do ESP32.
+O ambiente `esp32s3_sd_test` exercita o SD sem sensores, áudio ou LED RGB;
+roteiro em [SD_TEST.md](SD_TEST.md). No log `/SDTEST/R000003` enviado em
+2026-10-27, os casos 0–11 a 4 e 12 MHz concluíram a escrita e a verificação
+integral; 20 MHz e recuperação após reinicialização permanecem pendentes.
+Esse resultado não certifica estabilidade em todas as condições de aquisição.
+
+O teste SD ainda registra o texto fixo `vcc=3.3V` em seu `meta.txt`; esse campo
+está desatualizado para o HW-125 e não controla nem mede a tensão de alimentação.
+Preservar os arquivos originais e registrar separadamente HW-125 / VCC=5 V ao
+identificar esses ensaios, até a atualização do metadado no firmware de teste.
 
 A célula não será ligada diretamente à USB-C. Pads BATTERY+/BATTERY− não
 fazem parte do caminho confirmado de alimentação; não presumir que o carregador

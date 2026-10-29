@@ -6,13 +6,16 @@ namespace pet::drivers {
 namespace {
 
 constexpr uint8_t kDataRegister = 0x04;
+constexpr uint8_t kErrorRegister = 0x02;
 constexpr uint8_t kNvmStartRegister = 0x31;
 constexpr uint8_t kOversamplingRegister = 0x1C;
 constexpr uint8_t kOutputDataRateRegister = 0x1D;
 constexpr uint8_t kPowerControlRegister = 0x1B;
+constexpr uint8_t kIirConfigRegister = 0x1F;
 constexpr uint8_t kNoOversampling = 0x00;
 constexpr uint8_t kOutputDataRate25Hz = 0x03;
 constexpr uint8_t kPressureTemperatureNormalMode = 0x33;
+constexpr uint8_t kIirDisabled = 0x00;
 
 uint32_t decodeLittleEndianUint24(const uint8_t* bytes) {
   return static_cast<uint32_t>(bytes[0]) |
@@ -29,6 +32,7 @@ bool Bmp390::begin() {
   initialized_ = false;
   address_ = 0;
   chipId_ = 0;
+  configuration_ = {};
 
   if (!mux_.selectChannel(muxChannel_)) {
     return false;
@@ -58,14 +62,34 @@ bool Bmp390::begin() {
 }
 
 bool Bmp390::startRawSampling25Hz() {
+  configuration_ = {};
   if (!initialized_ || !mux_.selectChannel(muxChannel_)) {
     return false;
   }
 
-  return writeRegister(kOversamplingRegister, kNoOversampling) &&
-         writeRegister(kOutputDataRateRegister, kOutputDataRate25Hz) &&
-         writeRegister(kPowerControlRegister,
-                       kPressureTemperatureNormalMode);
+  // Configure in sleep mode; do not rely on the library's cached setters.
+  if (!writeRegister(kPowerControlRegister, 0x00) ||
+      !writeRegister(kOversamplingRegister, kNoOversampling) ||
+      !writeRegister(kOutputDataRateRegister, kOutputDataRate25Hz) ||
+      !writeRegister(kIirConfigRegister, kIirDisabled) ||
+      !writeRegister(kPowerControlRegister, kPressureTemperatureNormalMode)) {
+    return false;
+  }
+  // x1 pressure/temperature conversion takes at most 5.70 ms (Bosch table 23).
+  delay(10);
+  configuration_.readbackOk =
+      readRegisters(kPowerControlRegister, &configuration_.powerControl, 1) &&
+      readRegisters(kOversamplingRegister, &configuration_.oversampling, 1) &&
+      readRegisters(kOutputDataRateRegister, &configuration_.outputDataRate, 1) &&
+      readRegisters(kIirConfigRegister, &configuration_.iirConfig, 1) &&
+      readRegisters(kErrorRegister, &configuration_.error, 1);
+  configuration_.verified = configuration_.readbackOk &&
+      (configuration_.powerControl & 0x33) == kPressureTemperatureNormalMode &&
+      (configuration_.oversampling & 0x3F) == kNoOversampling &&
+      (configuration_.outputDataRate & 0x1F) == kOutputDataRate25Hz &&
+      (configuration_.iirConfig & 0x0E) == kIirDisabled &&
+      (configuration_.error & 0x07) == 0;  // fatal_err, cmd_err, conf_err.
+  return configuration_.verified;
 }
 
 bool Bmp390::readRaw(Bmp390RawSample& sample) {

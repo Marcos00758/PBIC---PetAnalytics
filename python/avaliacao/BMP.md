@@ -100,6 +100,42 @@ Snapshots de status não são um histórico de falhas por amostra.
 
 ## Capturas de bancada
 
+### Configuração verificável no firmware 0.6.2
+
+Desde 2026-10-29, a inicialização escreve explicitamente a configuração crua
+e relê PWR_CTRL, OSR, ODR, CONFIG e ERR_REG. Conferir em cada `BMP_INIT`:
+`raw25hz=1 nvm_valid=1 readback_ok=1 config_verified=1 pwr_ctrl=0x33 osr=0x00
+odr=0x03 iir_config=0x00 error_reg=0x00`. Os bytes também ficam em `meta.txt`;
+divergência, erro do sensor ou falha I2C impede iniciar a aquisição.
+O resumo serial é um snapshot do boot, não uma nova medição dos registradores.
+
+Filtros continuam desligados e o pacote permanece v4/79 bytes. Essa etapa
+verifica configuração, mas não resolve a mudança comum de pressão da S008,
+não monitora DRDY/idade do cache e não certifica altura em centímetros.
+Para postura, o ruído e a deriva observados impedem tratar altura barométrica
+como referência única; seu valor como entrada auxiliar do modelo precisa de
+validação comparando o desempenho com e sem essa entrada. Escadas/relevo são
+um uso futuro a validar com percursos e alturas de referência próprios.
+
+Verificação no computador, sem placa:
+
+```powershell
+& ".\.venv\Scripts\python.exe" -B -m unittest discover -s python/tests -p test_bmp390_config.py -v
+```
+
+O teste compila o driver real com I2C simulado e cobre configuração correta,
+escrita reconhecida sem alteração do registrador, leitura/escrita falha,
+fatal_err/cmd_err/conf_err e descarte de uma verificação anterior. Não substitui
+a conferência dos registradores na placa real.
+
+### Roteiro de movimento
+
+O [roteiro do segundo ensaio](ROTEIRO_BMP.md) detalha a investigação após a S004:
+um BMP permanece fixo enquanto o outro percorre +20 cm, zero e -20 cm, sem
+contato direto nas placas, com cronograma e registro dos eventos reais.
+O percurso foi reduzido em 2026-10-27 por limitação dos fios; os tempos foram
+mantidos e a diferença entre extremos passou a 40 cm.
+
 1. Repouso: 2–5 min em altura fixa; anotar tempo desde a alimentação,
    temperatura de referência se disponível e condições do ambiente.
 2. Elevação controlada: registrar níveis/alturas conhecidos, manter patamares

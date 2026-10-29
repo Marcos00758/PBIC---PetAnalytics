@@ -725,6 +725,23 @@ bool SdLogger::writeMetadata(const SdSessionMetadata& metadata) {
     file.print(i);
     file.print("_ready=");
     file.println(metadata.bmpReady[i] ? 1 : 0);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    const auto& cfg = metadata.bmpConfiguration[i];
+    file.print("bmp"); file.print(i); file.print("_config_readback_ok=");
+    file.println(cfg.readbackOk ? 1 : 0);
+    file.print("bmp"); file.print(i); file.print("_config_verified=");
+    file.println(cfg.verified ? 1 : 0);
+    file.print("bmp"); file.print(i); file.print("_pwr_ctrl=0x");
+    printHexByte(file, cfg.powerControl); file.println();
+    file.print("bmp"); file.print(i); file.print("_osr=0x");
+    printHexByte(file, cfg.oversampling); file.println();
+    file.print("bmp"); file.print(i); file.print("_odr=0x");
+    printHexByte(file, cfg.outputDataRate); file.println();
+    file.print("bmp"); file.print(i); file.print("_iir_config=0x");
+    printHexByte(file, cfg.iirConfig); file.println();
+    file.print("bmp"); file.print(i); file.print("_error_reg=0x");
+    printHexByte(file, cfg.error); file.println();
+#endif
     file.print("bmp");
     file.print(i);
     file.print("_address=0x");

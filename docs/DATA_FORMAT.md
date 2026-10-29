@@ -2,7 +2,7 @@
 
 ## Coleta integrada ESP32-S3 — 2026-10-10
 
-`esp32s3_acquisition`, firmware `0.6.1`, grava os mesmos pacotes v4/79 bytes,
+`esp32s3_acquisition`, firmware `0.6.2`, grava os mesmos pacotes v4/79 bytes,
 CRC-8 e journal binário em `/Sxxx/`: imu.bin, meta.txt, journal.bin, status.txt.
 Não cria audio.raw; `audio_enabled=0`. Sem filtros, conversão ou altitude no
 arquivo. ICMs nos canais 4/5/6, BMP0/1 7/3, NVM individual em hexadecimal.
@@ -25,6 +25,15 @@ iniciais das tarefas e timeout I2C para comparar sessões com configurações ig
 Endianness, offsets, magic, tamanho e journal não mudam. Copiar a pasta completa
 da sessão para o parser respeitar prefixo confirmado, excluindo pré-alocação
 e cauda sem sync. Capturas históricas mantêm seus metadados.
+
+Desde `0.6.2`, `meta.txt` acrescenta, para cada BMP (`N=0,1`),
+`bmpN_config_readback_ok`, `bmpN_config_verified`, `bmpN_pwr_ctrl`, `bmpN_osr`,
+`bmpN_odr`, `bmpN_iir_config` e `bmpN_error_reg`. São bytes lidos no boot;
+valores esperados: `0x33`, `0x00`, `0x03`, `0x00`, `0x00`, respectivamente.
+As duas flags precisam ser 1. A verificação mascara bits reservados; a ausência
+dos campos em sessões anteriores não significa configuração inválida.
+Esses campos não informam DRDY, idade ou validade individual de cada amostra,
+nem monitoram a configuração durante a gravação. Não mudam o pacote/journal.
 
 Status inclui `acquisition_max_lateness_us`, `acquisition_max_duration_us`,
 `queue_dropped_packets`, `storage_unavailable_packets`, `queue_high_water_packets`.
