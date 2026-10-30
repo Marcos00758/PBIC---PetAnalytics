@@ -44,6 +44,10 @@ não acessa o I2C para repetir o resumo. Filtros continuam desligados. A verific
 cada leitura posterior seja uma conversão nova. DRDY/idade do cache permanecem
 pendentes de uma etapa própria; a configuração verificada não corrige deriva.
 
+Pinagem SD revista em 2026-10-29: CS GPIO7, MISO GPIO4, SCK GPIO6 e MOSI GPIO5,
+centralizada em `config/pins.h` e usada na aquisição, preparação e diagnósticos.
+Os metadados novos identificam esses GPIOs; registros históricos mantêm os anteriores.
+
 `pbic-sd`, prioridade 2, núcleo 0, recebe o resultado de setup por cópia, monta
 SdFat com SPIClass FSPI próprio e `SHARED_SPI | USER_SPI_BEGIN`, cria sessão e
 libera aquisição. Só essa tarefa chama o logger, inclusive enqueue/manutenção.
@@ -130,9 +134,11 @@ de 2026-10-07 abaixo é o histórico da decisão agora implementada em bancada.
 ## Preparação ESP32-S3 em 2026-10-05
 
 O destino é a placa OEM ESP32-S3FH4R2. [HARDWARE_SPEC.md](HARDWARE_SPEC.md)
-consolida SDA/SCL GPIO1/2, SD SPI (CS GPIO4, MOSI GPIO5, MISO GPIO6, SCK GPIO7), PCA9548A mantido e alimentação
+consolida SDA/SCL GPIO1/2, o SD SPI, PCA9548A mantido e alimentação
 por conversor de 5 V na USB-C. ICM0/1/2 permanecem nos canais 4/5/6 e BMP0/1
 nos canais 7/3, conforme a montagem mais recente confirmada pelo usuário.
+Na preparação inicial, o SD usava CS=4, MOSI=5, MISO=6 e SCK=7; a pinagem
+atual revisada em 2026-10-29 está descrita na seção de integração acima.
 
 O ambiente padrão `esp32s3_supermini` compila apenas
 `src/bringup/esp32s3_setup.cpp`: USB Serial/JTAG CDC, diagnóstico de flash/PSRAM

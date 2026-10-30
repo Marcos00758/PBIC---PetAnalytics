@@ -4,7 +4,7 @@
 
 Placa OEM ESP32-S3 Super Mini/ESP32-S3FH4R2: flash 4 MB, PSRAM Quad SPI 2 MB,
 USB nativa e PCA9548A mantido. Alimentação confirmada: bateria externa com
-conversor de 5 V conectado à USB-C. I2C GPIO1/2; SD SPI: CS GPIO4, MOSI GPIO5, MISO GPIO6, SCK GPIO7.
+conversor de 5 V conectado à USB-C. I2C GPIO1/2; SD SPI: CS GPIO7, MOSI GPIO5, MISO GPIO4, SCK GPIO6.
 Mapa confirmado: ICM0/1/2 nos canais 4/5/6 e BMP0/1 nos canais 7/3.
 Detalhes elétricos em [HARDWARE_SPEC.md](docs/HARDWARE_SPEC.md).
 
@@ -50,7 +50,8 @@ Comandos e interpretação: [docs/PCA_TEST.md](docs/PCA_TEST.md).
 ## Teste independente ESP32 + SD
 
 O ambiente `esp32s3_sd_test` usa SdFat 2.3.1 e a montagem confirmada
-(módulo SD alimentado em **3,3 V**, SPI: CS GPIO4, MOSI GPIO5, MISO GPIO6, SCK GPIO7). Compara blocos e clocks,
+(SPI: CS GPIO7, MOSI GPIO5, MISO GPIO4, SCK GPIO6; alimentação conforme
+[HARDWARE_SPEC.md](docs/HARDWARE_SPEC.md)). Compara blocos e clocks,
 verifica padrões/CRC e recupera checkpoints após reinício, sem áudio ou
 aquisição de sensores. Começa a gravar apenas com comando serial `s`.
 

@@ -366,14 +366,17 @@ bool newRun() {
   if (!f.open(name, O_WRONLY | O_CREAT | O_EXCL)) return failure("metadata_open");
   f.printf("format=SDT1\ntest_version=3\ncid=%s\nsdfat=%s\nsectors=%lu\nfat=%u\n"
            "cpu_mhz=%u\nflash_bytes=%lu\npsram_bytes=%lu\n"
-           "sck=7\nmiso=6\nmosi=5\ncs=4\nvcc=3.3V\nspi_mode=SHARED_SPI\n"
+           "sck=%u\nmiso=%u\nmosi=%u\ncs=%u\nvcc=3.3V\nspi_mode=SHARED_SPI\n"
            "spi_bus=%s\nspi_begin=USER_SPI_BEGIN\nboot_path=%s\nreference_spi_hz=4000000\n"
            "clocks_mhz=4,12,20\nblocks_bytes=512,1024,4096\n"
            "paced_target_Bps=7900\npaced_packet_bytes=79\npaced_period_us=10000\n"
            "maximum_bytes=%llu\npaced_bytes=%llu\n",
            cardId, SD_FAT_VERSION_STR, static_cast<unsigned long>(sd.card()->sectorCount()),
            sd.fatType(), ESP.getCpuFreqMHz(), static_cast<unsigned long>(ESP.getFlashChipSize()),
-           static_cast<unsigned long>(ESP.getPsramSize()), spiBusName(), bootPath, kMaximumBytes, kPacedBytes);
+           static_cast<unsigned long>(ESP.getPsramSize()),
+           unsigned(pet::pins::kSdSck), unsigned(pet::pins::kSdMiso),
+           unsigned(pet::pins::kSdMosi), unsigned(pet::pins::kSdChipSelect),
+           spiBusName(), bootPath, kMaximumBytes, kPacedBytes);
   if (f.getWriteError() || !f.close()) return failure("metadata_write");
   snprintf(name, sizeof(name), "%s/results.csv", runPath);
   if (!f.open(name, O_WRONLY | O_CREAT | O_EXCL)) return failure("results_create");

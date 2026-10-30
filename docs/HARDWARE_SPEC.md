@@ -29,10 +29,13 @@ Os números abaixo são **GPIOs do ESP32**, não posições físicas no conector
 |---|---|---:|
 | I2C → PCA9548A | SDA | 1 |
 | I2C → PCA9548A | SCL | 2 |
-| SPI → microSD | SCK | 7 |
-| SPI → microSD | MISO | 6 |
+| SPI → microSD | SCK | 6 |
+| SPI → microSD | MISO | 4 |
 | SPI → microSD | MOSI | 5 |
-| SPI → microSD | CS | 4 |
+| SPI → microSD | CS | 7 |
+
+Pinagem SD revista a pedido do usuário em **2026-10-29**. Antes dessa revisão,
+CS=4, MISO=6, SCK=7 e MOSI=5; sessões e logs anteriores mantêm esse registro.
 
 PCA9548A e sensores continuam na distribuição de 3V3/GND, com terra comum
 com ESP32 e SD. I2C configurado para 400 kHz. O CS do cartão é colocado em
@@ -84,8 +87,8 @@ informou que as conexões de hardware estavam concluídas. Esse registro de
 3,3 V se refere ao módulo anterior.
 
 **Montagem atual, informada em 2026-10-21 e com alimentação confirmada em
-2026-10-27:** módulo leitor **HW-125 com VCC ligado em 5 V**, mantendo
-CS GPIO4, MOSI GPIO5, MISO GPIO6 e SCK GPIO7, com terra comum e sinais SPI do
+2026-10-27:** módulo leitor **HW-125 com VCC ligado em 5 V**. Pinagem revista
+em 2026-10-29: CS GPIO7, MOSI GPIO5, MISO GPIO4 e SCK GPIO6, com terra comum e sinais SPI do
 ESP32 em 3,3 V. A revisão/circuito do HW-125 e a origem física dos 5 V não
 foram verificados independentemente; não aplicar 5 V aos GPIOs do ESP32.
 O ambiente `esp32s3_sd_test` exercita o SD sem sensores, áudio ou LED RGB;

@@ -1,10 +1,14 @@
 # Teste independente ESP32-S3 + microSD
 
-Implementação SDT1 para a placa OEM FH4R2 e módulo alimentado em **3,3 V**,
-com conexões já concluídas pelo usuário: SCK GPIO7, MISO GPIO6, MOSI GPIO5,
-CS GPIO4. Ambiente `esp32s3_sd_test`, SdFat **2.3.1** explícito, `SdFs`/`FsFile`
+Implementação SDT1 para a placa OEM FH4R2 e montagem descrita em
+[HARDWARE_SPEC.md](HARDWARE_SPEC.md). Pinagem revista em 2026-10-29:
+SCK GPIO6, MISO GPIO4, MOSI GPIO5, CS GPIO7.
+Ambiente `esp32s3_sd_test`, SdFat **2.3.1** explícito, `SdFs`/`FsFile`
 para FAT16/FAT32/exFAT. Compartilha defaults em `src/config/storage_config.h`
 com a aplicação existente, sem portar o logger Teensy neste passo.
+
+As conexões e os campos de pinagem do `meta.txt` usam `src/config/pins.h`,
+compartilhado com a aquisição. Logs anteriores preservam a pinagem antiga.
 
 ## Executar na bancada
 

@@ -159,10 +159,14 @@ segurança: `data/` é ignorado pelo Git.
 
 ## Montagem SD desta revisão
 
-O usuário confirmou módulo **HW-125 com VCC em 5 V**, mantendo CS=GPIO4,
+Na revisão de 2026-10-27, o usuário confirmou **HW-125 com VCC em 5 V**, com CS=GPIO4,
 MOSI=GPIO5, MISO=GPIO6 e SCK=GPIO7. O log de `/SDTEST/R000003` enviado em
 2026-10-27 contém os casos 0–11, a 4/12 MHz e blocos de 512/1024/4096 bytes,
 todos com verificação `complete=1` e `ok=1`. Houve atrasos de agenda no teste
 de carga; a integridade não certifica todos os prazos da aquisição real.
 20 MHz e a recuperação após reinicialização ainda não foram concluídos nesse
 log. Manter os 12 MHz atuais no ensaio BMP e preservar o log da aquisição.
+
+Para novas gravações após a revisão de 2026-10-29, usar **CS=GPIO7, MISO=GPIO4,
+SCK=GPIO6 e MOSI=GPIO5**. O log citado acima é anterior à troca e conserva a
+pinagem antiga. Alimentação e cronograma do ensaio permanecem os mesmos.

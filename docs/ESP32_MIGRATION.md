@@ -9,7 +9,7 @@ explícito `esp32s3_acquisition`; validação física/concorrência permanece pe
 ## Hardware e PlatformIO confirmados
 
 - I2C do PCA9548A: SDA GPIO1, SCL GPIO2, 400 kHz.
-- SD SPI: SCK GPIO7, MISO GPIO6, MOSI GPIO5, CS GPIO4.
+- SD SPI (revisão de 2026-10-29): SCK GPIO6, MISO GPIO4, MOSI GPIO5, CS GPIO7.
 - PCA9548A mantido: ICM0/1/2 nos canais 4/5/6; BMP0/1 nos canais 7/3.
   O mapa antigo da `main` foi corrigido em `constants.h` após confirmação.
 - Alimentação: bateria externa com conversor regulado de 5 V na USB-C.
